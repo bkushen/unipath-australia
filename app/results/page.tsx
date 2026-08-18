@@ -69,7 +69,7 @@ export default function ResultsPage() {
         <div>
           <p className="sectionLabel">PERSONALISED COURSE MATCHES</p>
           <h1>Your recommended study options</h1>
-          <p>Ranked using academic fit, career alignment, affordability, location preference and available pathway information.</p>
+          <p>Ranked using academic fit, career alignment, affordability, location preference and available pathway evidence.</p>
         </div>
         {catalogMode === "verified" ? (
           <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Verified course catalogue</b><span>Core course details come from source-dated university records. Missing cost or pathway information is shown as pending rather than estimated without evidence.</span></div></div>
@@ -87,7 +87,7 @@ export default function ResultsPage() {
           <div className="scoreCircle"><strong>{top.totalScore}</strong><span>/100 fit score</span></div>
         </div>
         <div className="scoreBreakdown">
-          <Score label="Academic" value={top.scores.academic}/><Score label="Career" value={top.scores.career}/><Score label="Affordability" value={top.scores.affordability}/><Score label="Location" value={top.scores.location}/><Score label="Pathways" value={top.scores.migration}/>
+          <Score label="Academic" value={top.scores.academic}/><Score label="Career" value={top.scores.career}/><Score label="Affordability" value={top.scores.affordability}/><Score label="Location" value={top.scores.location}/><Score label="Migration evidence" value={top.scores.migration}/>
         </div>
       </section>}
 
@@ -105,8 +105,8 @@ export default function ResultsPage() {
               <div className="costRow">
                 <div><small>ANNUAL TUITION{result.feeYear ? ` (${result.feeYear})` : ""}</small><b>{money(result.annualFee)}</b></div>
                 <div><small>EST. LIVING / MONTH</small><b>{money(result.estimatedMonthlyLiving)}</b></div>
-                <div><small>EST. TOTAL COURSE + LIVING</small><b>{result.estimatedTotalCost === null ? "Pending living data" : money(result.estimatedTotalCost)}</b></div>
-                <div><small>PATHWAY ALIGNMENT</small><b>{result.migrationAlignment === "Unknown" ? "Pending verified mapping" : result.migrationAlignment}</b></div>
+                <div><small>CURRENT-RATE COURSE + LIVING PROJECTION</small><b>{result.estimatedTotalCost === null ? "Pending comparable data" : `~${money(result.estimatedTotalCost)}`}</b></div>
+                <div><small>VERIFIED PATHWAY EVIDENCE</small><b>{pathwayEvidence(result)}</b></div>
               </div>
 
               {(result.accreditation || result.sourceUrl || catalogMode === "verified") && <div className="evidenceRow">
@@ -134,7 +134,7 @@ export default function ResultsPage() {
           <Summary icon={<MapPin/>} label="Preferred location" value={profile.city || profile.state || "Australia-wide"}/>
           <Summary icon={<Route/>} label="Post-study goal" value={goalLabel(profile.migrationGoal)}/>
           <a className="secondary full" href="/assessment">Change preferences</a>
-          <div className="pathwayDisclaimer"><b>Important</b><p>A fit or pathway score is not a probability of receiving PR, a visa, admission or employment. Migration eligibility depends on current law and individual circumstances.</p></div>
+          <div className="pathwayDisclaimer"><b>Important</b><p>A fit or migration-evidence score is not a probability of receiving PR, a visa, admission or employment. Migration eligibility depends on current law, skills assessment, occupation tasks and individual circumstances.</p></div>
         </aside>
       </section>
     </main>
@@ -159,6 +159,13 @@ function durationLabel(months: number) {
   if (!months) return "Duration pending";
   const years = months / 12;
   return `${Number.isInteger(years) ? years : years.toFixed(1)} years`;
+}
+
+function pathwayEvidence(course: CourseCandidate) {
+  if ((course.migrationEvidenceCount ?? 0) > 0) {
+    return course.migrationEvidenceLabels?.join("; ") ?? `${course.migrationEvidenceCount} verified link`;
+  }
+  return "Pending conservative mapping";
 }
 
 function goalLabel(value: string) {
