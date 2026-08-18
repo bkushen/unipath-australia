@@ -64,6 +64,7 @@ for (let index = 0; index < selected.length; index += 1) {
   if (!code) continue;
 
   const sourceUrl = `https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=${encodeURIComponent(code.toLowerCase())}`;
+  let captured = false;
   try {
     const html = await fetchPage(sourceUrl);
     const text = textFromHtml(html);
@@ -73,6 +74,8 @@ for (let index = 0; index < selected.length; index += 1) {
 
     if (tuition === null) {
       failures.push({ cricos_code: code, reason: "Tuition Fee label/value not found", source_url: sourceUrl });
+    } else if (tuition <= 0) {
+      failures.push({ cricos_code: code, reason: "CRICOS tuition value is zero or negative", source_url: sourceUrl });
     } else {
       results.push({
         cricos_code: code,
@@ -82,12 +85,13 @@ for (let index = 0; index < selected.length; index += 1) {
         source_url: sourceUrl,
         verified_at: verifiedAt,
       });
+      captured = true;
     }
   } catch (error) {
     failures.push({ cricos_code: code, reason: String(error), source_url: sourceUrl });
   }
 
-  console.log(`[${index + 1}/${selected.length}] ${code}: ${results.at(-1)?.cricos_code === code ? "fee captured" : "not captured"}`);
+  console.log(`[${index + 1}/${selected.length}] ${code}: ${captured ? "fee captured" : "not captured"}`);
   if (index < selected.length - 1) await sleep(delayMs);
 }
 
