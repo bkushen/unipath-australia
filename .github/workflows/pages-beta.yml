@@ -1,5 +1,6 @@
 name: Deploy public beta to GitHub Pages
 
+# Real file change to trigger Pages after enabling GitHub Pages.
 on:
   push:
     branches: [main]
