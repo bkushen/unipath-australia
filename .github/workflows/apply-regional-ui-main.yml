@@ -1,3 +1,4 @@
+# retry-trigger: workflow now exists on default branch
 name: Apply validated regional UI on main
 
 on:
