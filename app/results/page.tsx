@@ -112,17 +112,18 @@ export default function ResultsPage() {
               <div className="costRow">
                 <div><small>{tuitionLabel(result)}</small><b>{money(result.annualFee)}</b></div>
                 <div><small>EST. LIVING / MONTH</small><b>{money(result.estimatedMonthlyLiving)}</b></div>
-                <div><small>EST. COURSE + LIVING PROJECTION</small><b>{result.estimatedTotalCost === null ? "Pending comparable data" : `~${money(result.estimatedTotalCost)}`}</b></div>
+                <div><small>COURSE TUITION + LIVING PROJECTION</small><b>{totalProjectionLabel(result)}</b></div>
                 <div><small>VERIFIED PATHWAY EVIDENCE</small><b>{pathwayEvidence(result)}</b></div>
               </div>
 
-              {(result.accreditation || result.sourceUrl || catalogMode === "verified") && <div className="evidenceRow">
+              {(result.accreditation || result.sourceUrl || result.feeSourceUrl || catalogMode === "verified") && <div className="evidenceRow">
                 <div className="evidenceMeta">{result.accreditation && <span><ShieldCheck size={14}/>{result.accreditation}</span>}</div>
                 <div className="evidenceActions">
                   {catalogMode === "verified" && <SaveCourseButton courseId={result.id} compact />}
                   {catalogMode === "verified" && <a href={`/courses/${result.id}`}>Course details →</a>}
                   {catalogMode === "verified" && index > 0 && top && <a href={`/compare?ids=${top.id},${result.id}`}>Compare with #1 →</a>}
-                  {result.sourceUrl && <a href={result.sourceUrl} target="_blank" rel="noreferrer">Official source <ExternalLink size={13}/></a>}
+                  {result.feeSourceUrl && <a href={result.feeSourceUrl} target="_blank" rel="noreferrer">Fee source <ExternalLink size={13}/></a>}
+                  {result.sourceUrl && result.sourceUrl !== result.feeSourceUrl && <a href={result.sourceUrl} target="_blank" rel="noreferrer">Course source <ExternalLink size={13}/></a>}
                 </div>
               </div>}
 
@@ -171,8 +172,14 @@ function regionalStatusLabel(course: CourseCandidate) {
 
 function tuitionLabel(course: CourseCandidate) {
   if (course.feeYear) return `ANNUAL TUITION (${course.feeYear})`;
-  if (course.annualFee !== null && course.cricosCode) return "ANNUALISED CRICOS TUITION ESTIMATE";
+  if (course.annualFee !== null && course.totalTuition != null) return "ANNUALISED CRICOS TUITION ESTIMATE";
   return "ANNUAL TUITION";
+}
+
+function totalProjectionLabel(course: ReturnType<typeof rankCourses>[number]) {
+  if (course.estimatedTotalCost !== null) return `~${money(course.estimatedTotalCost)}`;
+  if (course.totalTuition != null) return `${money(course.totalTuition)} tuition · living pending`;
+  return "Pending comparable data";
 }
 
 function durationLabel(months: number) {
