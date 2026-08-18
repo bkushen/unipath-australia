@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, BriefcaseBusiness, CheckCircle2, DollarSign, GraduationCap, MapPin, Route } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BriefcaseBusiness, CheckCircle2, DollarSign, ExternalLink, GraduationCap, MapPin, Route, ShieldCheck } from "lucide-react";
 import { demoCourses } from "@/lib/demo-courses";
-import { rankCourses, type StudentAssessment } from "@/lib/recommendation";
+import { loadVerifiedCourseCandidates } from "@/lib/course-catalog";
+import { rankCourses, type CourseCandidate, type StudentAssessment } from "@/lib/recommendation";
 
 const emptyProfile: StudentAssessment = {
   qualification: "",
@@ -20,42 +21,70 @@ const emptyProfile: StudentAssessment = {
   migrationGoal: "explore",
 };
 
-const money = (value: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(value);
+const money = (value: number | null) => value === null
+  ? "Not yet verified"
+  : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(value);
 
 export default function ResultsPage() {
   const [profile, setProfile] = useState<StudentAssessment>(emptyProfile);
+  const [courses, setCourses] = useState<CourseCandidate[]>(demoCourses);
+  const [catalogMode, setCatalogMode] = useState<"loading" | "verified" | "fallback">("loading");
 
   useEffect(() => {
     const saved = window.localStorage.getItem("unipath-assessment");
     if (saved) {
       try { setProfile(JSON.parse(saved)); } catch { setProfile(emptyProfile); }
     }
+
+    let active = true;
+    loadVerifiedCourseCandidates()
+      .then((verified) => {
+        if (!active) return;
+        if (verified.length) {
+          setCourses(verified);
+          setCatalogMode("verified");
+        } else {
+          setCatalogMode("fallback");
+        }
+      })
+      .catch((error) => {
+        console.error("Verified catalogue unavailable", error);
+        if (active) setCatalogMode("fallback");
+      });
+
+    return () => { active = false; };
   }, []);
 
-  const results = useMemo(() => rankCourses(profile, demoCourses), [profile]);
+  const results = useMemo(() => rankCourses(profile, courses), [profile, courses]);
   const top = results[0];
 
   return (
     <main className="resultsPage">
       <header className="assessmentHeader shell">
         <a href="/" className="brand"><span>U</span> UniPath Australia</a>
-        <a href="/assessment" className="editProfile"><ArrowLeft size={16}/> Edit assessment</a>
+        <div className="resultsHeaderActions"><a href="/dashboard" className="editProfile">Dashboard</a><a href="/assessment" className="editProfile"><ArrowLeft size={16}/> Edit assessment</a></div>
       </header>
 
       <section className="resultsHero shell">
         <div>
           <p className="sectionLabel">PERSONALISED COURSE MATCHES</p>
           <h1>Your recommended study options</h1>
-          <p>Ranked using academic fit, career alignment, affordability, location preference and migration-pathway alignment.</p>
+          <p>Ranked using academic fit, career alignment, affordability, location preference and available pathway information.</p>
         </div>
-        <div className="demoBanner"><AlertTriangle size={18}/><div><b>Prototype data</b><span>Course names, fees, living costs and pathway indicators below are illustrative demo records. Production launch will use source-dated verified records.</span></div></div>
+        {catalogMode === "verified" ? (
+          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Verified course catalogue</b><span>Core course details come from source-dated university records. Missing cost or pathway information is shown as pending rather than estimated without evidence.</span></div></div>
+        ) : catalogMode === "fallback" ? (
+          <div className="demoBanner"><AlertTriangle size={18}/><div><b>Demo fallback active</b><span>The live verified catalogue could not be loaded, so these results use illustrative records and must not be used for enrolment or migration decisions.</span></div></div>
+        ) : (
+          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Loading verified catalogue</b><span>Checking the latest records stored in UniPath.</span></div></div>
+        )}
       </section>
 
       {top && <section className="bestMatch shell">
         <div className="bestBadge">BEST CURRENT MATCH</div>
         <div className="bestMain">
-          <div><p>{top.university}</p><h2>{top.course}</h2><div className="courseMeta"><span><MapPin size={15}/>{top.city}, {top.state}</span><span><GraduationCap size={15}/>{top.durationMonths / 12} years</span><span>{top.regional ? "Regional" : "Metropolitan"}</span></div></div>
-          <div className="scoreCircle"><strong>{top.totalScore}</strong><span>/100 match</span></div>
+          <div><p>{top.university}</p><h2>{top.course}</h2><div className="courseMeta"><span><MapPin size={15}/>{locationLabel(top)}</span><span><GraduationCap size={15}/>{durationLabel(top.durationMonths)}</span>{top.state && <span>{top.regional ? "Regional" : "Metropolitan"}</span>}</div></div>
+          <div className="scoreCircle"><strong>{top.totalScore}</strong><span>/100 fit score</span></div>
         </div>
         <div className="scoreBreakdown">
           <Score label="Academic" value={top.scores.academic}/><Score label="Career" value={top.scores.career}/><Score label="Affordability" value={top.scores.affordability}/><Score label="Location" value={top.scores.location}/><Score label="Pathways" value={top.scores.migration}/>
@@ -64,25 +93,30 @@ export default function ResultsPage() {
 
       <section className="resultsLayout shell">
         <div className="resultsList">
-          <div className="listTitle"><h2>All recommendations</h2><span>{results.length} prototype matches</span></div>
+          <div className="listTitle"><h2>All recommendations</h2><span>{results.length} {catalogMode === "verified" ? "verified catalogue" : "prototype"} matches</span></div>
           {results.map((result, index) => (
             <article className="resultCard" key={result.id}>
               <div className="resultRank">#{index + 1}</div>
               <div className="resultTop">
-                <div><small>{result.university}</small><h3>{result.course}</h3><div className="courseMeta"><span><MapPin size={14}/>{result.city}, {result.state}</span><span>{result.regional ? "Regional" : "Metro"}</span></div></div>
-                <div className="resultScore"><strong>{result.totalScore}%</strong><span>overall match</span></div>
+                <div><small>{result.university}</small><h3>{result.course}</h3><div className="courseMeta"><span><MapPin size={14}/>{locationLabel(result)}</span>{result.courseCode && <span>Code {result.courseCode}</span>}{result.cricosCode && <span>CRICOS {result.cricosCode}</span>}</div></div>
+                <div className="resultScore"><strong>{result.totalScore}%</strong><span>decision fit</span></div>
               </div>
 
               <div className="costRow">
-                <div><small>ANNUAL TUITION</small><b>{money(result.annualFee)}</b></div>
+                <div><small>ANNUAL TUITION{result.feeYear ? ` (${result.feeYear})` : ""}</small><b>{money(result.annualFee)}</b></div>
                 <div><small>EST. LIVING / MONTH</small><b>{money(result.estimatedMonthlyLiving)}</b></div>
-                <div><small>EST. TOTAL COURSE + LIVING</small><b>{money(result.estimatedTotalCost)}</b></div>
-                <div><small>PATHWAY ALIGNMENT</small><b>{result.migrationAlignment}</b></div>
+                <div><small>EST. TOTAL COURSE + LIVING</small><b>{result.estimatedTotalCost === null ? "Pending living data" : money(result.estimatedTotalCost)}</b></div>
+                <div><small>PATHWAY ALIGNMENT</small><b>{result.migrationAlignment === "Unknown" ? "Pending verified mapping" : result.migrationAlignment}</b></div>
               </div>
+
+              {(result.accreditation || result.sourceUrl) && <div className="evidenceRow">
+                {result.accreditation && <span><ShieldCheck size={14}/>{result.accreditation}</span>}
+                {result.sourceUrl && <a href={result.sourceUrl} target="_blank" rel="noreferrer">Official course source <ExternalLink size={13}/></a>}
+              </div>}
 
               <div className="reasonColumns">
                 <div><h4><CheckCircle2 size={16}/> Why it matches</h4>{result.reasons.length ? result.reasons.map(reason => <p key={reason}>{reason}</p>) : <p>Complete more profile fields for a more personalised explanation.</p>}</div>
-                <div className="cautions"><h4><AlertTriangle size={16}/> Things to check</h4>{result.cautions.length ? result.cautions.map(caution => <p key={caution}>{caution}</p>) : <p>No major prototype concerns identified from the supplied profile.</p>}</div>
+                <div className="cautions"><h4><AlertTriangle size={16}/> Things to check</h4>{result.cautions.length ? result.cautions.map(caution => <p key={caution}>{caution}</p>) : <p>No major concerns identified from the currently verified fields.</p>}</div>
               </div>
             </article>
           ))}
@@ -96,7 +130,7 @@ export default function ResultsPage() {
           <Summary icon={<MapPin/>} label="Preferred location" value={profile.city || profile.state || "Australia-wide"}/>
           <Summary icon={<Route/>} label="Post-study goal" value={goalLabel(profile.migrationGoal)}/>
           <a className="secondary full" href="/assessment">Change preferences</a>
-          <div className="pathwayDisclaimer"><b>Important</b><p>A pathway score is not a probability of receiving PR or a visa. Eligibility depends on current law and individual circumstances.</p></div>
+          <div className="pathwayDisclaimer"><b>Important</b><p>A fit or pathway score is not a probability of receiving PR, a visa, admission or employment. Migration eligibility depends on current law and individual circumstances.</p></div>
         </aside>
       </section>
     </main>
@@ -109,6 +143,18 @@ function Score({ label, value }: { label: string; value: number }) {
 
 function Summary({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return <div className="summaryItem"><span>{icon}</span><div><small>{label}</small><b>{value}</b></div></div>;
+}
+
+function locationLabel(course: CourseCandidate) {
+  if (course.city && course.state) return `${course.city}, ${course.state}`;
+  if (course.state) return course.state;
+  return "Campus pending verification";
+}
+
+function durationLabel(months: number) {
+  if (!months) return "Duration pending";
+  const years = months / 12;
+  return `${Number.isInteger(years) ? years : years.toFixed(1)} years`;
 }
 
 function goalLabel(value: string) {
