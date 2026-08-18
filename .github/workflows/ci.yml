@@ -7,16 +7,14 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout validation branch
+      - name: Checkout
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.head_ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -24,8 +22,8 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Install dependencies and generate lockfile
-        run: npm install
+      - name: Install locked dependencies
+        run: npm ci
 
       - name: Production dependency audit
         run: npm audit --omit=dev
@@ -35,16 +33,3 @@ jobs:
 
       - name: Production build
         run: npm run build
-
-      - name: Commit generated lockfile
-        shell: bash
-        run: |
-          if git diff --quiet -- package-lock.json && git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
-            echo "package-lock.json already committed"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          git commit -m "chore: add reproducible package lock"
-          git push origin HEAD:${{ github.head_ref }}
