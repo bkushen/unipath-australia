@@ -5,10 +5,12 @@ const outputFile = process.env.OUTPUT_FILE ?? "/tmp/cricos-fees.json";
 const limit = Number(process.env.LIMIT ?? 20);
 const offset = Number(process.env.OFFSET ?? 0);
 const delayMs = Number(process.env.DELAY_MS ?? 500);
+const minimumPlausibleTuition = Number(process.env.MIN_PLAUSIBLE_TUITION ?? 100);
 const verifiedAt = new Date().toISOString();
 
 if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error("LIMIT must be an integer between 1 and 200");
 if (!Number.isInteger(offset) || offset < 0) throw new Error("OFFSET must be a non-negative integer");
+if (!Number.isFinite(minimumPlausibleTuition) || minimumPlausibleTuition < 0) throw new Error("MIN_PLAUSIBLE_TUITION must be zero or positive");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -74,8 +76,12 @@ for (let index = 0; index < selected.length; index += 1) {
 
     if (tuition === null) {
       failures.push({ cricos_code: code, reason: "Tuition Fee label/value not found", source_url: sourceUrl });
-    } else if (tuition <= 0) {
-      failures.push({ cricos_code: code, reason: "CRICOS tuition value is zero or negative", source_url: sourceUrl });
+    } else if (tuition <= minimumPlausibleTuition) {
+      failures.push({
+        cricos_code: code,
+        reason: `CRICOS tuition ${tuition} is at or below the ${minimumPlausibleTuition} AUD plausibility threshold; manual review required`,
+        source_url: sourceUrl,
+      });
     } else {
       results.push({
         cricos_code: code,
@@ -96,7 +102,7 @@ for (let index = 0; index < selected.length; index += 1) {
 }
 
 await writeFile(outputFile, `${JSON.stringify(results, null, 2)}\n`, "utf8");
-console.log(JSON.stringify({ sourceFile, offset, requested: selected.length, captured: results.length, failed: failures.length, outputFile }, null, 2));
+console.log(JSON.stringify({ sourceFile, offset, requested: selected.length, captured: results.length, failed: failures.length, minimumPlausibleTuition, outputFile }, null, 2));
 if (failures.length) console.error(JSON.stringify({ failures }, null, 2));
 
 if (results.length === 0) process.exitCode = 1;
