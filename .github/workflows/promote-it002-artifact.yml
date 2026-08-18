@@ -1,0 +1,79 @@
+name: Promote IT fee batch 002 artifact
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/promote-it002-artifact.yml"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  promote:
+    if: github.event.pull_request.head.ref == 'agent/fee-it002-snapshot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact snapshot branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/fee-it002-snapshot
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Download existing validated artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: cricos-fee-it-002
+          path: /tmp/it002
+          repository: bkushen/unipath-australia
+          run-id: 32094394085
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify exact artifact and fee snapshot
+        env:
+          FEE_FILE: /tmp/it002/cricos-fee-it-002.json
+          MIN_PLAUSIBLE_TUITION: 100
+        run: |
+          echo "602ad8a2727d07455f5472deec99d6ae9c61591095fac803061c9606225883d7  $FEE_FILE" | sha256sum --check --strict
+          node scripts/validate-cricos-fee-snapshot.mjs
+
+      - name: Promote immutable data snapshot
+        run: |
+          mkdir -p data/cricos/fees
+          cp /tmp/it002/cricos-fee-it-002.json data/cricos/fees/2026-08-18-it-002.json
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const crypto = require('node:crypto');
+          const file = 'data/cricos/fees/2026-08-18-it-002.json';
+          const rows = JSON.parse(fs.readFileSync(file, 'utf8'));
+          const sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+          const manifest = {
+            snapshot: '2026-08-18-it-002',
+            source_course_chunk: 'data/cricos/chunks/courses-02-information-technology-002.json',
+            requested_courses: 150,
+            captured_records: rows.length,
+            importable_records: rows.length,
+            minimum_plausible_tuition_aud: 100,
+            file: '2026-08-18-it-002.json',
+            sha256,
+            verified_at: rows[0]?.verified_at ?? null,
+            held_for_review: []
+          };
+          fs.writeFileSync('data/cricos/fees/2026-08-18-it-002-manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+          NODE
+
+      - name: Commit promoted snapshot and remove one-use workflow
+        run: |
+          rm .github/workflows/promote-it002-artifact.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add audited second IT CRICOS fee snapshot"
+          git push origin HEAD:agent/fee-it002-snapshot
