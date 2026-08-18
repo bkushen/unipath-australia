@@ -16,6 +16,17 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
 
+      - name: Normalize current provider-capacity header variants
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/normalize_cricos.py')
+          text = path.read_text()
+          text = text.replace('number(row["Number of Students"])', 'number(row.get("Number of Students") or row.get("Total Capacity"))')
+          path.write_text(text)
+          PY
+
       - name: Generate normalized snapshot
         run: python scripts/normalize_cricos.py
 
