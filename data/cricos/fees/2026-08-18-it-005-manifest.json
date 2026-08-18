@@ -1,0 +1,16 @@
+{
+  "source_batch": "data/cricos/chunks/courses-02-information-technology-005.json",
+  "requested": 150,
+  "captured_and_validated": 149,
+  "held_for_review": 1,
+  "minimum_plausible_tuition_aud": 100,
+  "artifact_id": 9311524425,
+  "workflow_run_id": 32100868032,
+  "artifact_zip_sha256": "ba87820665ef10817ea079a87f3cb4c5bd9061527d0bc4b156f34d363d4ae2c7",
+  "snapshot_sha256": "2fe2f589611a189f97f8229d472092c4d5d5813eb93c6541817f871f2b94227f",
+  "tuition_min_aud": 19920,
+  "tuition_max_aud": 261900,
+  "held_records": [
+    {"cricos_code":"056083G","reason":"CRICOS tuition 0; held by plausibility guard"}
+  ]
+}
