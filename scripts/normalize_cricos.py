@@ -135,15 +135,15 @@ def main() -> None:
                 "trading_name": row["Trading Name"] or None,
                 "institution_name": row["Institution Name"] or None,
                 "institution_type": row["Institution Type"] or None,
-                "number_of_students": number(row["Number of Students"]),
+                "number_of_students": number(row.get("Number of Students") or row.get("Total Capacity") or row.get("Institution Capacity")),
                 "website": row["Website"] or None,
                 "postal_address_line_1": row["Postal Address Line 1"] or None,
                 "postal_address_line_2": row["Postal Address Line 2"] or None,
                 "postal_address_line_3": row["Postal Address Line 3"] or None,
                 "postal_address_line_4": row["Postal Address Line 4"] or None,
-                "postal_city": row["Postal City"] or None,
-                "postal_state": row["Postal State"] or None,
-                "postal_postcode": row["Postal Postcode"] or None,
+                "postal_city": (row.get("Postal City") or row.get("Postal Address City")) or None,
+                "postal_state": (row.get("Postal State") or row.get("Postal Address State")) or None,
+                "postal_postcode": (row.get("Postal Postcode") or row.get("Postal Address Postcode")) or None,
             }
         )
 
