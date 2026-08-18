@@ -10,12 +10,14 @@ type CompareCourse = {
   qualification_level: string;
   university_course_code: string | null;
   cricos_code: string | null;
+  cricos_tuition_fee_total: number | null;
+  cricos_duration_weeks: number | null;
   duration_months: number | null;
   source_url: string | null;
   universities: { name: string } | null;
   study_fields: { name: string } | null;
   course_fees: Array<{ fee_year: number; student_type: string; annual_fee: number | null; verification_status: string }>;
-  course_campuses: Array<{ campuses: { name: string; city: string; state: string; regional: boolean; living_costs: LivingCost[] } | null }>;
+  course_campuses: Array<{ campuses: { name: string; city: string; state: string; regional: boolean; regional_verified: boolean; living_costs: LivingCost[] } | null }>;
   entry_requirements: Array<{ academic_text: string | null; minimum_gpa: number | null; ielts_overall: number | null; pte_overall: number | null }>;
   course_accreditations: Array<{ body_name: string; accreditation_level: string | null; status: string | null }>;
   course_occupations: Array<{ occupations: { name: string } | null }>;
@@ -56,12 +58,14 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
           qualification_level,
           university_course_code,
           cricos_code,
+          cricos_tuition_fee_total,
+          cricos_duration_weeks,
           duration_months,
           source_url,
           universities(name),
           study_fields(name),
           course_fees(fee_year, student_type, annual_fee, verification_status),
-          course_campuses(campuses(name, city, state, regional, living_costs(weekly_low, weekly_high, monthly_estimate, verification_status))),
+          course_campuses(campuses(name, city, state, regional, regional_verified, living_costs(weekly_low, weekly_high, monthly_estimate, verification_status))),
           entry_requirements(academic_text, minimum_gpa, ielts_overall, pte_overall),
           course_accreditations(body_name, accreditation_level, status),
           course_occupations(occupations(name)),
@@ -99,7 +103,7 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
       <section className="compareHero shell">
         <p className="sectionLabel">SIDE-BY-SIDE COMPARISON</p>
         <h1>Compare your shortlisted courses</h1>
-        <p>Only source-backed fields are compared. Missing living-cost or migration information stays visibly pending until it is verified.</p>
+        <p>Only source-backed fields are compared. Missing living-cost, regional or migration information stays visibly pending until it is verified.</p>
       </section>
 
       {!courses.length ? (
@@ -110,14 +114,14 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
             <div className="comparisonLabel headerLabel">COURSE</div>
             {courses.map((course) => <div className="comparisonCourseHead" key={course.id}><small>{course.universities?.name ?? "University"}</small><h2>{course.name}</h2><a href={`/courses/${course.id}`}>Full details →</a></div>)}
 
-            <CompareRow label="Latest verified international fee" courses={courses} render={latestFeeLabel} />
+            <CompareRow label="International tuition" courses={courses} render={latestFeeLabel} />
             <CompareRow label="Course duration" courses={courses} render={(course) => course.duration_months ? `${course.duration_months / 12} years` : "Pending verification"} />
             <CompareRow label="Campus / location" courses={courses} render={campusLabel} />
-            <CompareRow label="Regional status" courses={courses} render={(course) => { const campus = firstCampus(course); return campus ? (campus.regional ? "Regional" : "Metropolitan") : "Pending verification"; }} />
+            <CompareRow label="Migration-regional status" courses={courses} render={regionalLabel} />
             <CompareRow label="Course code" courses={courses} render={(course) => course.university_course_code ?? "Pending"} />
             <CompareRow label="CRICOS" courses={courses} render={(course) => course.cricos_code ?? "Pending verification"} />
             <CompareRow label="Study area" courses={courses} render={(course) => course.study_fields?.name ?? "Pending"} />
-            <CompareRow label="Academic entry" courses={courses} render={(course) => course.entry_requirements[0]?.academic_text ?? "Pending verification"} long />
+            <CompareRow label="Academic entry" courses={courses} render={(course) => course.entry_requirements[0]?.academic_text ?? "Pending university-specific verification"} long />
             <CompareRow label="IELTS overall" courses={courses} render={(course) => course.entry_requirements[0]?.ielts_overall?.toString() ?? "Pending"} />
             <CompareRow label="PTE overall" courses={courses} render={(course) => course.entry_requirements[0]?.pte_overall?.toString() ?? "Not recorded"} />
             <CompareRow label="Professional accreditation" courses={courses} render={accreditationLabel} long />
@@ -128,11 +132,11 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
           </div>
 
           <div className="compareEvidence">
-            <ShieldCheck size={18}/><div><b>Evidence-first comparison</b><span>Fee years are shown explicitly so different academic years are not silently treated as equivalent. Living costs remain estimates. Migration rows only appear when a course-career title has been conservatively linked to a current Home Affairs skilled occupation record.</span></div>
+            <ShieldCheck size={18}/><div><b>Evidence-first comparison</b><span>University fee years are shown explicitly. When only CRICOS total tuition is available, UniPath shows an annualised CRICOS estimate rather than pretending it is a university-published annual fee. Regional and migration rows remain pending until separately verified.</span></div>
           </div>
 
           <div className="compareSources">
-            <h2>Official course sources</h2>
+            <h2>Course sources</h2>
             {courses.map((course) => <div key={course.id}><span>{course.universities?.name} — {course.name}</span>{course.source_url ? <a href={course.source_url} target="_blank" rel="noreferrer">Open source <ExternalLink size={13}/></a> : <b>Source pending</b>}</div>)}
           </div>
         </section>
@@ -154,9 +158,21 @@ function campusLabel(course: CompareCourse) {
   return campus ? `${campus.name} · ${campus.city}, ${campus.state}` : "Pending verification";
 }
 
+function regionalLabel(course: CompareCourse) {
+  const campus = firstCampus(course);
+  if (!campus) return "Pending campus verification";
+  if (!campus.regional_verified) return "Pending authoritative regional classification";
+  return campus.regional ? "Regional" : "Metropolitan";
+}
+
 function latestFeeLabel(course: CompareCourse) {
   const fee = [...course.course_fees].filter((item) => item.student_type === "international" && item.verification_status === "VERIFIED").sort((a, b) => b.fee_year - a.fee_year)[0];
-  return fee ? `${money(fee.annual_fee)} (${fee.fee_year})` : "Pending verification";
+  if (fee) return `${money(fee.annual_fee)} (${fee.fee_year} university annual fee)`;
+  if (course.cricos_tuition_fee_total !== null && course.cricos_duration_weeks !== null && course.cricos_duration_weeks > 0) {
+    const annualised = Math.round(course.cricos_tuition_fee_total / (course.cricos_duration_weeks / 52));
+    return `~${money(annualised)}/year (annualised from CRICOS total tuition ${money(course.cricos_tuition_fee_total)})`;
+  }
+  return "Pending verification";
 }
 
 function livingCostLabel(course: CompareCourse) {
@@ -179,7 +195,7 @@ function migrationLabel(course: CompareCourse, links: CompareMigrationLink[]) {
       .map((program) => program.subclass)
       .filter((value, index, values) => values.indexOf(value) === index)
       .join(", ");
-    return `${occupation.name} — ANZSCO ${codes}; ACS; current listed programs: ${programs}. ${item.confidence.toLowerCase()} evidence title correspondence only.`;
+    return `${occupation.name} — ANZSCO ${codes}; ${occupation.assessing_authority ?? "assessing authority pending"}; current listed programs: ${programs}. ${item.confidence.toLowerCase()} evidence title correspondence only.`;
   }).join(" | ");
 }
 
@@ -190,10 +206,10 @@ function accreditationLabel(course: CompareCourse) {
 
 function careerLabel(course: CompareCourse) {
   const careers = course.course_occupations.map((item) => item.occupations?.name).filter(Boolean);
-  return careers.length ? careers.join(", ") : "Pending verification";
+  return careers.length ? careers.join(", ") : "Pending university-specific verification";
 }
 
 function intakeLabel(course: CompareCourse) {
   const intakes = [...course.course_intakes].sort((a, b) => a.year - b.year || a.month - b.month);
-  return intakes.length ? intakes.map((item) => `${monthName(item.month)} ${item.year}`).join(", ") : "Pending verification";
+  return intakes.length ? intakes.map((item) => `${monthName(item.month)} ${item.year}`).join(", ") : "Pending university-specific verification";
 }
