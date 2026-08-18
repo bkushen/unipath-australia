@@ -22,6 +22,7 @@ export type CourseCandidate = {
   state: string;
   city: string;
   regional: boolean;
+  regionalVerified?: boolean;
   annualFee: number | null;
   durationMonths: number;
   estimatedMonthlyLiving: number | null;
@@ -145,13 +146,17 @@ export function scoreCourse(profile: StudentAssessment, course: CourseCandidate)
       location = 100;
       reasons.push(`Located in your preferred city (${course.city})`);
     }
-    if (profile.regional === "yes" && course.regional) {
-      location = Math.min(100, location + 8);
-      reasons.push("Regional location matches your preference");
-    }
-    if (profile.regional === "no" && course.regional) {
-      location = Math.max(35, location - 20);
-      cautions.push("This course is at a regional campus but you selected a metropolitan preference");
+    if (course.regionalVerified) {
+      if (profile.regional === "yes" && course.regional) {
+        location = Math.min(100, location + 8);
+        reasons.push("Verified regional location matches your preference");
+      }
+      if (profile.regional === "no" && course.regional) {
+        location = Math.max(35, location - 20);
+        cautions.push("This course is at a verified regional campus but you selected a metropolitan preference");
+      }
+    } else if (profile.regional !== "maybe") {
+      cautions.push("Migration-regional classification has not yet been verified for this campus");
     }
   }
 
