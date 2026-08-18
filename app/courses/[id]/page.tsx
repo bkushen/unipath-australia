@@ -4,6 +4,15 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+type LivingCost = {
+  category: string;
+  weekly_low: number | null;
+  weekly_high: number | null;
+  monthly_estimate: number | null;
+  source_url: string | null;
+  verification_status: string;
+};
+
 type CourseDetail = {
   id: string;
   name: string;
@@ -18,7 +27,7 @@ type CourseDetail = {
   universities: { name: string; website: string | null } | null;
   study_fields: { name: string } | null;
   course_fees: Array<{ fee_year: number; student_type: string; annual_fee: number | null; total_fee: number | null; notes: string | null; source_url: string | null; verification_status: string }>;
-  course_campuses: Array<{ campuses: { name: string; city: string; state: string; regional: boolean } | null }>;
+  course_campuses: Array<{ campuses: { name: string; city: string; state: string; regional: boolean; living_costs: LivingCost[] } | null }>;
   entry_requirements: Array<{ academic_text: string | null; minimum_gpa: number | null; ielts_overall: number | null; pte_overall: number | null; source_url: string | null }>;
   course_occupations: Array<{ alignment_score: number | null; occupations: { name: string; code: string | null; assessing_authority: string | null; source_url: string | null } | null }>;
   course_accreditations: Array<{ body_name: string; accreditation_level: string | null; status: string | null; valid_from: string | null; valid_to: string | null; source_url: string | null }>;
@@ -51,7 +60,7 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
       universities(name, website),
       study_fields(name),
       course_fees(fee_year, student_type, annual_fee, total_fee, notes, source_url, verification_status),
-      course_campuses(campuses(name, city, state, regional)),
+      course_campuses(campuses(name, city, state, regional, living_costs(category, weekly_low, weekly_high, monthly_estimate, source_url, verification_status))),
       entry_requirements(academic_text, minimum_gpa, ielts_overall, pte_overall, source_url),
       course_occupations(alignment_score, occupations(name, code, assessing_authority, source_url)),
       course_accreditations(body_name, accreditation_level, status, valid_from, valid_to, source_url),
@@ -65,6 +74,7 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
   if (error || !data) notFound();
   const course = data as unknown as CourseDetail;
   const campus = course.course_campuses.find((item) => item.campuses)?.campuses ?? null;
+  const livingCost = campus?.living_costs.find((item) => item.verification_status !== "UNVERIFIED") ?? null;
   const latestFee = course.course_fees
     .filter((fee) => fee.student_type === "international" && fee.verification_status === "VERIFIED")
     .sort((a, b) => b.fee_year - a.fee_year)[0] ?? null;
@@ -108,8 +118,10 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
           <CourseSection icon={<DollarSign/>} title="Fees and affordability">
             <div className="detailGrid">
               {course.course_fees.length ? course.course_fees.sort((a,b)=>b.fee_year-a.fee_year).map((fee) => <div className="detailTile" key={`${fee.fee_year}-${fee.student_type}`}><small>{fee.fee_year} · {fee.student_type}</small><strong>{money(fee.annual_fee)}</strong><span>{fee.notes ?? "Annual tuition record"}</span></div>) : <EmptyText text="International tuition data is still being verified." />}
+              {livingCost && <div className="detailTile"><small>{livingCost.verification_status} LOCATION BUDGET</small><strong>{livingRange(livingCost)}</strong><span>{livingCost.monthly_estimate !== null ? `Indicative midpoint ${money(livingCost.monthly_estimate)}/month. Actual spending varies by lifestyle and housing.` : "Indicative source range."}</span>{livingCost.source_url && <a className="tileSource" href={livingCost.source_url} target="_blank" rel="noreferrer">Living-cost source <ExternalLink size={12}/></a>}</div>}
             </div>
-            <div className="detailNotice">Living-cost estimates are deliberately excluded until a source-backed location budget is available. UniPath will not manufacture a total-study-cost figure.</div>
+            {!livingCost && <div className="detailNotice">A comparable source-backed living-cost estimate has not yet been loaded for this campus. UniPath will not manufacture a total-study-cost figure.</div>}
+            {livingCost && <div className="detailNotice">Living costs are estimates, not visa financial-capacity amounts or guaranteed spending. Tuition may also change in later academic years, so UniPath does not multiply one year&apos;s fee into a falsely precise whole-degree total.</div>}
           </CourseSection>
 
           <CourseSection icon={<BadgeCheck/>} title="Entry requirements">
@@ -138,6 +150,7 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
             <h3>Data confidence</h3>
             <div><ShieldCheck/><span><b>Course record</b>Verified</span></div>
             <div><ShieldCheck/><span><b>University source</b>{course.source_url ? "Available" : "Pending"}</span></div>
+            <div><ShieldCheck/><span><b>Living cost</b>{livingCost ? `${livingCost.verification_status.toLowerCase()} source range` : "Pending comparable source"}</span></div>
             <div><ShieldCheck/><span><b>Last database verification</b>{course.verified_at ? new Date(course.verified_at).toLocaleDateString("en-AU") : "Pending"}</span></div>
             <p>Migration pathway analysis is intentionally not displayed until occupation codes, assessing authorities and current visa eligibility have been verified against government sources.</p>
           </div>
@@ -153,4 +166,13 @@ function CourseSection({ icon, title, children }: { icon: React.ReactNode; title
 
 function EmptyText({ text }: { text: string }) {
   return <p className="emptyDetail">{text}</p>;
+}
+
+function livingRange(cost: LivingCost) {
+  if (cost.weekly_low !== null && cost.weekly_high !== null) {
+    const annualLow = cost.weekly_low * 52;
+    const annualHigh = cost.weekly_high * 52;
+    return `${money(annualLow)}–${money(annualHigh)}/year`;
+  }
+  return cost.monthly_estimate !== null ? `${money(cost.monthly_estimate)}/month` : "Estimate pending";
 }
