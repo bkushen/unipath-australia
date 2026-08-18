@@ -25,24 +25,26 @@ jobs:
         with:
           node-version: 22
 
-      - name: Fetch small official CRICOS fee sample
+      - name: Fetch fourth full IT CRICOS fee batch
         env:
-          SOURCE_FILE: data/cricos/chunks/courses-02-information-technology-001.json
-          OUTPUT_FILE: /tmp/cricos-fee-canary.json
-          LIMIT: 20
+          SOURCE_FILE: data/cricos/chunks/courses-02-information-technology-004.json
+          OUTPUT_FILE: /tmp/cricos-fee-it-004.json
+          LIMIT: 150
           OFFSET: 0
           DELAY_MS: 500
+          MIN_PLAUSIBLE_TUITION: 100
         run: node scripts/fetch-cricos-fees.mjs
 
       - name: Validate captured fee snapshot
         env:
-          FEE_FILE: /tmp/cricos-fee-canary.json
+          FEE_FILE: /tmp/cricos-fee-it-004.json
+          MIN_PLAUSIBLE_TUITION: 100
         run: node scripts/validate-cricos-fee-snapshot.mjs
 
-      - name: Upload fee canary artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload fee batch artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: cricos-fee-canary
-          path: /tmp/cricos-fee-canary.json
+          name: cricos-fee-it-004
+          path: /tmp/cricos-fee-it-004.json
           if-no-files-found: error
           retention-days: 3
