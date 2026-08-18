@@ -1,14 +1,11 @@
 import { redirect } from "next/navigation";
-import { Bookmark, ClipboardCheck, GraduationCap, LogOut, Route } from "lucide-react";
+import { Bookmark, ClipboardCheck, FileCheck2, GraduationCap, LogOut, Route } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 
 type SavedCourseRow = {
   id: string;
   course_id: string;
-  courses: {
-    name: string;
-    universities: { name: string } | null;
-  } | null;
+  courses: { name: string; universities: { name: string } | null } | null;
 };
 
 export default async function DashboardPage() {
@@ -17,10 +14,11 @@ export default async function DashboardPage() {
   const userId = claimsData?.claims?.sub;
   if (!userId) redirect("/login");
 
-  const [{ data: profile }, { data: assessments }, { data: savedData }] = await Promise.all([
+  const [{ data: profile }, { data: assessments }, { data: savedData }, { count: applicationCount }] = await Promise.all([
     supabase.from("student_profiles").select("highest_qualification, qualification_field, desired_occupation, preferred_states, migration_goal").eq("user_id", userId).maybeSingle(),
     supabase.from("assessments").select("id, created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(5),
     supabase.from("saved_courses").select("id, course_id, courses(name, universities(name))").eq("user_id", userId).order("created_at", { ascending: false }),
+    supabase.from("student_applications").select("id", { count: "exact", head: true }).eq("user_id", userId),
   ]);
 
   const saved = (savedData ?? []) as unknown as SavedCourseRow[];
@@ -36,7 +34,7 @@ export default async function DashboardPage() {
       <section className="dashboardHero shell">
         <p className="sectionLabel">MY UNIPATH</p>
         <h1>Your study planning dashboard</h1>
-        <p className="muted">Keep your profile, assessments, shortlisted courses and future comparisons together.</p>
+        <p className="muted">Keep your profile, assessments, shortlist, comparisons and applications together.</p>
       </section>
 
       <section className="dashboardGrid shell">
@@ -49,12 +47,13 @@ export default async function DashboardPage() {
 
         <article className="dashCard"><ClipboardCheck/><small>ASSESSMENTS</small><strong>{assessments?.length ?? 0}</strong><span>Recent assessments saved</span><a href="/assessment">Run a new assessment →</a></article>
         <article className="dashCard"><Bookmark/><small>SAVED COURSES</small><strong>{saved.length}</strong><span>Courses on your shortlist</span><a href="#shortlist">Open shortlist →</a></article>
+        <article className="dashCard"><FileCheck2/><small>APPLICATIONS</small><strong>{applicationCount ?? 0}</strong><span>Courses in your application tracker</span><a href="/applications">Open application tracker →</a></article>
         <article className="dashCard"><Route/><small>PATHWAY GOAL</small><strong className="textStrong">{profile?.migration_goal || "Not set"}</strong><span>Migration information remains educational and source-dated.</span></article>
       </section>
 
       <section className="recentPanel shell" id="shortlist">
         <div className="panelHeading"><div><p className="sectionLabel">SHORTLIST</p><h2>Saved courses</h2></div>{saved.length >= 2 && <a className="secondary" href={`/compare?ids=${compareIds}`}>Compare saved courses</a>}</div>
-        {saved.length ? <div className="savedCourseList">{saved.map((item) => <a href={`/courses/${item.course_id}`} key={item.id}><div><b>{item.courses?.name ?? "Course"}</b><span>{item.courses?.universities?.name ?? "University"}</span></div><small>Open details →</small></a>)}</div> : <div className="emptyState">No courses saved yet. Open your recommendations and use “Save course” to build a shortlist.</div>}
+        {saved.length ? <div className="savedCourseList">{saved.map((item) => <a href={`/courses/${item.course_id}`} key={item.id}><div><b>{item.courses?.name ?? "Course"}</b><span>{item.courses?.universities?.name ?? "University"}</span></div><small>Open details →</small></a>)}</div> : <div className="emptyState">No courses saved yet. Use the course explorer or recommendations to build a shortlist.</div>}
       </section>
 
       <section className="recentPanel shell">
