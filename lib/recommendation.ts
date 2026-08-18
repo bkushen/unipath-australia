@@ -154,7 +154,7 @@ export function scoreCourse(profile: StudentAssessment, course: CourseCandidate)
   }
 
   const migrationMap = { Strong: 92, Moderate: 72, Limited: 45, Unknown: 55 } as const;
-  let migration = migrationMap[course.migrationAlignment];
+  let migration: number = migrationMap[course.migrationAlignment];
   const migrationImportant = ["explore", "regional", "employer"].includes(profile.migrationGoal);
 
   if (["return", "temporary", "unsure"].includes(profile.migrationGoal)) {
