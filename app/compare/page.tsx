@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+type LivingCost = { weekly_low: number | null; weekly_high: number | null; monthly_estimate: number | null; verification_status: string };
 type CompareCourse = {
   id: string;
   name: string;
@@ -14,7 +15,7 @@ type CompareCourse = {
   universities: { name: string } | null;
   study_fields: { name: string } | null;
   course_fees: Array<{ fee_year: number; student_type: string; annual_fee: number | null; verification_status: string }>;
-  course_campuses: Array<{ campuses: { name: string; city: string; state: string; regional: boolean } | null }>;
+  course_campuses: Array<{ campuses: { name: string; city: string; state: string; regional: boolean; living_costs: LivingCost[] } | null }>;
   entry_requirements: Array<{ academic_text: string | null; minimum_gpa: number | null; ielts_overall: number | null; pte_overall: number | null }>;
   course_accreditations: Array<{ body_name: string; accreditation_level: string | null; status: string | null }>;
   course_occupations: Array<{ occupations: { name: string } | null }>;
@@ -30,7 +31,6 @@ const monthName = (month: number) => new Intl.DateTimeFormat("en-AU", { month: "
 export default async function ComparePage({ searchParams }: { searchParams: Promise<{ ids?: string }> }) {
   const { ids: rawIds } = await searchParams;
   const ids = (rawIds ?? "").split(",").map((id) => id.trim()).filter(Boolean).slice(0, 4);
-
   const supabase = await createClient();
   let courses: CompareCourse[] = [];
 
@@ -48,7 +48,7 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
         universities(name),
         study_fields(name),
         course_fees(fee_year, student_type, annual_fee, verification_status),
-        course_campuses(campuses(name, city, state, regional)),
+        course_campuses(campuses(name, city, state, regional, living_costs(weekly_low, weekly_high, monthly_estimate, verification_status))),
         entry_requirements(academic_text, minimum_gpa, ielts_overall, pte_overall),
         course_accreditations(body_name, accreditation_level, status),
         course_occupations(occupations(name)),
@@ -93,14 +93,14 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
             <CompareRow label="IELTS overall" courses={courses} render={(course) => course.entry_requirements[0]?.ielts_overall?.toString() ?? "Pending"} />
             <CompareRow label="PTE overall" courses={courses} render={(course) => course.entry_requirements[0]?.pte_overall?.toString() ?? "Not recorded"} />
             <CompareRow label="Professional accreditation" courses={courses} render={accreditationLabel} long />
-            <CompareRow label="Recorded career outcomes" courses={courses} render={(course) => careerLabel(course)} long />
+            <CompareRow label="Recorded career outcomes" courses={courses} render={careerLabel} long />
             <CompareRow label="Recorded intakes" courses={courses} render={intakeLabel} />
-            <CompareRow label="Living cost" courses={courses} render={() => "Pending verified location budget"} />
+            <CompareRow label="Indicative living cost" courses={courses} render={livingCostLabel} />
             <CompareRow label="Migration pathway mapping" courses={courses} render={() => "Pending government-verified occupation mapping"} />
           </div>
 
           <div className="compareEvidence">
-            <ShieldCheck size={18}/><div><b>Evidence-first comparison</b><span>Fee years are shown explicitly so different academic years are not silently treated as equivalent. Migration information is not inferred from a course name.</span></div>
+            <ShieldCheck size={18}/><div><b>Evidence-first comparison</b><span>Fee years are shown explicitly so different academic years are not silently treated as equivalent. Living costs remain estimates. Migration information is not inferred from a course name.</span></div>
           </div>
 
           <div className="compareSources">
@@ -127,10 +127,16 @@ function campusLabel(course: CompareCourse) {
 }
 
 function latestFeeLabel(course: CompareCourse) {
-  const fee = [...course.course_fees]
-    .filter((item) => item.student_type === "international" && item.verification_status === "VERIFIED")
-    .sort((a, b) => b.fee_year - a.fee_year)[0];
+  const fee = [...course.course_fees].filter((item) => item.student_type === "international" && item.verification_status === "VERIFIED").sort((a, b) => b.fee_year - a.fee_year)[0];
   return fee ? `${money(fee.annual_fee)} (${fee.fee_year})` : "Pending verification";
+}
+
+function livingCostLabel(course: CompareCourse) {
+  const cost = firstCampus(course)?.living_costs.find((item) => item.verification_status !== "UNVERIFIED");
+  if (!cost) return "Pending comparable source";
+  if (cost.weekly_low !== null && cost.weekly_high !== null) return `${money(cost.weekly_low * 52)}–${money(cost.weekly_high * 52)}/year (${cost.verification_status.toLowerCase()})`;
+  if (cost.monthly_estimate !== null) return `${money(cost.monthly_estimate)}/month (${cost.verification_status.toLowerCase()})`;
+  return "Pending comparable source";
 }
 
 function accreditationLabel(course: CompareCourse) {
