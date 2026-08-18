@@ -22,6 +22,17 @@ type CompareCourse = {
   course_intakes: Array<{ month: number; year: number }>;
 };
 
+type CompareMigrationLink = {
+  course_id: string;
+  confidence: string;
+  skilled_occupations: {
+    name: string;
+    assessing_authority: string | null;
+    skilled_occupation_codes: Array<{ anzsco_code: string; anzsco_version: string }>;
+    skilled_occupation_programs: Array<{ migration_programs: { subclass: string; name: string; stream: string; pathway_type: string } | null }>;
+  } | null;
+};
+
 const money = (value: number | null) => value === null
   ? "Pending verification"
   : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(value);
@@ -33,32 +44,49 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
   const ids = (rawIds ?? "").split(",").map((id) => id.trim()).filter(Boolean).slice(0, 4);
   const supabase = await createClient();
   let courses: CompareCourse[] = [];
+  let migrationLinks: CompareMigrationLink[] = [];
 
   if (ids.length) {
-    const { data } = await supabase
-      .from("courses")
-      .select(`
-        id,
-        name,
-        qualification_level,
-        university_course_code,
-        cricos_code,
-        duration_months,
-        source_url,
-        universities(name),
-        study_fields(name),
-        course_fees(fee_year, student_type, annual_fee, verification_status),
-        course_campuses(campuses(name, city, state, regional, living_costs(weekly_low, weekly_high, monthly_estimate, verification_status))),
-        entry_requirements(academic_text, minimum_gpa, ielts_overall, pte_overall),
-        course_accreditations(body_name, accreditation_level, status),
-        course_occupations(occupations(name)),
-        course_intakes(month, year)
-      `)
-      .in("id", ids)
-      .eq("verification_status", "VERIFIED");
+    const [{ data }, { data: migrationData }] = await Promise.all([
+      supabase
+        .from("courses")
+        .select(`
+          id,
+          name,
+          qualification_level,
+          university_course_code,
+          cricos_code,
+          duration_months,
+          source_url,
+          universities(name),
+          study_fields(name),
+          course_fees(fee_year, student_type, annual_fee, verification_status),
+          course_campuses(campuses(name, city, state, regional, living_costs(weekly_low, weekly_high, monthly_estimate, verification_status))),
+          entry_requirements(academic_text, minimum_gpa, ielts_overall, pte_overall),
+          course_accreditations(body_name, accreditation_level, status),
+          course_occupations(occupations(name)),
+          course_intakes(month, year)
+        `)
+        .in("id", ids)
+        .eq("verification_status", "VERIFIED"),
+      supabase
+        .from("course_skilled_occupation_links")
+        .select(`
+          course_id,
+          confidence,
+          skilled_occupations(
+            name,
+            assessing_authority,
+            skilled_occupation_codes(anzsco_code, anzsco_version),
+            skilled_occupation_programs(migration_programs(subclass, name, stream, pathway_type))
+          )
+        `)
+        .in("course_id", ids)
+    ]);
 
     const loaded = (data ?? []) as unknown as CompareCourse[];
     courses = ids.map((id) => loaded.find((course) => course.id === id)).filter((item): item is CompareCourse => Boolean(item));
+    migrationLinks = (migrationData ?? []) as unknown as CompareMigrationLink[];
   }
 
   return (
@@ -96,11 +124,11 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
             <CompareRow label="Recorded career outcomes" courses={courses} render={careerLabel} long />
             <CompareRow label="Recorded intakes" courses={courses} render={intakeLabel} />
             <CompareRow label="Indicative living cost" courses={courses} render={livingCostLabel} />
-            <CompareRow label="Migration pathway mapping" courses={courses} render={() => "Pending government-verified occupation mapping"} />
+            <CompareRow label="Verified skilled-migration evidence" courses={courses} render={(course) => migrationLabel(course, migrationLinks)} long />
           </div>
 
           <div className="compareEvidence">
-            <ShieldCheck size={18}/><div><b>Evidence-first comparison</b><span>Fee years are shown explicitly so different academic years are not silently treated as equivalent. Living costs remain estimates. Migration information is not inferred from a course name.</span></div>
+            <ShieldCheck size={18}/><div><b>Evidence-first comparison</b><span>Fee years are shown explicitly so different academic years are not silently treated as equivalent. Living costs remain estimates. Migration rows only appear when a course-career title has been conservatively linked to a current Home Affairs skilled occupation record.</span></div>
           </div>
 
           <div className="compareSources">
@@ -137,6 +165,22 @@ function livingCostLabel(course: CompareCourse) {
   if (cost.weekly_low !== null && cost.weekly_high !== null) return `${money(cost.weekly_low * 52)}–${money(cost.weekly_high * 52)}/year (${cost.verification_status.toLowerCase()})`;
   if (cost.monthly_estimate !== null) return `${money(cost.monthly_estimate)}/month (${cost.verification_status.toLowerCase()})`;
   return "Pending comparable source";
+}
+
+function migrationLabel(course: CompareCourse, links: CompareMigrationLink[]) {
+  const linked = links.filter((item) => item.course_id === course.id && item.skilled_occupations);
+  if (!linked.length) return "No conservative course-to-skilled-occupation mapping verified yet";
+  return linked.map((item) => {
+    const occupation = item.skilled_occupations!;
+    const codes = occupation.skilled_occupation_codes.map((code) => `${code.anzsco_code} (${code.anzsco_version})`).join("/");
+    const programs = occupation.skilled_occupation_programs
+      .map((entry) => entry.migration_programs)
+      .filter((program): program is NonNullable<typeof program> => Boolean(program))
+      .map((program) => program.subclass)
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .join(", ");
+    return `${occupation.name} — ANZSCO ${codes}; ACS; current listed programs: ${programs}. ${item.confidence.toLowerCase()} evidence title correspondence only.`;
+  }).join(" | ");
 }
 
 function accreditationLabel(course: CompareCourse) {
