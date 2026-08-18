@@ -1,8 +1,8 @@
 name: Apply regional category UI v2
 
 on:
-  push:
-    branches: [agent/regional-category-ui-v2]
+  pull_request:
+    branches: [main]
     paths:
       - ".github/workflows/apply-regional-category-ui-v2.yml"
 
@@ -11,10 +11,11 @@ permissions:
 
 jobs:
   apply:
+    if: github.event.pull_request.head.ref == 'agent/regional-category-ui-v2'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
-      - name: Checkout integration branch
+      - name: Checkout exact integration branch
         uses: actions/checkout@v6
         with:
           ref: agent/regional-category-ui-v2
@@ -78,11 +79,11 @@ jobs:
               'function cricosFeeSummary(course: CourseDetail, annualisedFee: number | null) {',
               'function regionalCategoryLabel(category: string) {\n  if (category.startsWith("CATEGORY_2")) return "Home Affairs Category 2 · Cities and Major Regional Centres";\n  if (category.startsWith("CATEGORY_3")) return "Home Affairs Category 3 · Regional Centres and Other Regional Areas";\n  if (category.startsWith("CATEGORY_1")) return "Home Affairs Category 1 · Major city / not designated regional";\n  return category;\n}\n\nfunction cricosFeeSummary(course: CourseDetail, annualisedFee: number | null) {', 1)
 
-          workflow = Path('.github/workflows/cricos-fee-canary.yml')
-          if workflow.exists():
-              text = workflow.read_text()
+          fee_canary = Path('.github/workflows/cricos-fee-canary.yml')
+          if fee_canary.exists():
+              text = fee_canary.read_text()
               if 'uses: actions/upload-artifact@v4' in text:
-                  workflow.write_text(text.replace('uses: actions/upload-artifact@v4', 'uses: actions/upload-artifact@v7'))
+                  fee_canary.write_text(text.replace('uses: actions/upload-artifact@v4', 'uses: actions/upload-artifact@v7'))
 
           Path('.github/workflows/apply-regional-category-ui-v2.yml').unlink()
           PY
@@ -94,7 +95,7 @@ jobs:
           npm run typecheck
           npm run build
 
-      - name: Commit tested changes
+      - name: Commit tested application changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
