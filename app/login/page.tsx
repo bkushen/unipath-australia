@@ -1,8 +1,9 @@
 import { GraduationCap, LockKeyhole, Mail } from "lucide-react";
 import { login, signup } from "./actions";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; message?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; message?: string; next?: string }> }) {
   const query = await searchParams;
+  const next = query.next?.startsWith("/") && !query.next.startsWith("//") ? query.next : "/dashboard";
 
   return (
     <main className="authPage">
@@ -17,6 +18,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         {query.message && <div className="authAlert success">{query.message}</div>}
 
         <form className="authForm">
+          <input type="hidden" name="next" value={next} />
           <label><span><Mail size={16}/> Email</span><input name="email" type="email" autoComplete="email" required placeholder="you@example.com" /></label>
           <label><span><LockKeyhole size={16}/> Password</span><input name="password" type="password" minLength={8} autoComplete="current-password" required placeholder="At least 8 characters" /></label>
           <div className="authActions">
