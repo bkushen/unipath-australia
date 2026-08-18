@@ -32,13 +32,19 @@ export default function ResultsPage() {
   const [catalogMode, setCatalogMode] = useState<"loading" | "verified" | "fallback">("loading");
 
   useEffect(() => {
+    let assessment = emptyProfile;
     const saved = window.localStorage.getItem("unipath-assessment");
     if (saved) {
-      try { setProfile(JSON.parse(saved)); } catch { setProfile(emptyProfile); }
+      try {
+        assessment = { ...emptyProfile, ...JSON.parse(saved) };
+        setProfile(assessment);
+      } catch {
+        setProfile(emptyProfile);
+      }
     }
 
     let active = true;
-    loadVerifiedCourseCandidates()
+    loadVerifiedCourseCandidates(assessment.field)
       .then((verified) => {
         if (!active) return;
         if (verified.length) {
@@ -73,18 +79,18 @@ export default function ResultsPage() {
           <p>Ranked using academic fit, career alignment, affordability, location preference and available pathway evidence.</p>
         </div>
         {catalogMode === "verified" ? (
-          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Verified course catalogue</b><span>Core course details come from source-dated university records. Missing cost or pathway information is shown as pending rather than estimated without evidence.</span></div></div>
+          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Verified course catalogue</b><span>Core course details come from source-dated university and CRICOS records. Missing cost, regional or pathway information stays visibly pending until verified.</span></div></div>
         ) : catalogMode === "fallback" ? (
           <div className="demoBanner"><AlertTriangle size={18}/><div><b>Demo fallback active</b><span>The live verified catalogue could not be loaded, so these results use illustrative records and must not be used for enrolment or migration decisions.</span></div></div>
         ) : (
-          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Loading verified catalogue</b><span>Checking the latest records stored in UniPath.</span></div></div>
+          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Loading verified catalogue</b><span>Checking the most relevant source-backed course records for your study area.</span></div></div>
         )}
       </section>
 
       {top && <section className="bestMatch shell">
         <div className="bestBadge">BEST CURRENT MATCH</div>
         <div className="bestMain">
-          <div><p>{top.university}</p><h2>{top.course}</h2><div className="courseMeta"><span><MapPin size={15}/>{locationLabel(top)}</span><span><GraduationCap size={15}/>{durationLabel(top.durationMonths)}</span>{top.state && <span>{top.regional ? "Regional" : "Metropolitan"}</span>}</div>{catalogMode === "verified" && <div className="bestMatchActions"><a className="bestDetailsLink" href={`/courses/${top.id}`}>Open full course details →</a><SaveCourseButton courseId={top.id} compact /></div>}</div>
+          <div><p>{top.university}</p><h2>{top.course}</h2><div className="courseMeta"><span><MapPin size={15}/>{locationLabel(top)}</span><span><GraduationCap size={15}/>{durationLabel(top.durationMonths)}</span>{regionalStatusLabel(top) && <span>{regionalStatusLabel(top)}</span>}</div>{catalogMode === "verified" && <div className="bestMatchActions"><a className="bestDetailsLink" href={`/courses/${top.id}`}>Open full course details →</a><SaveCourseButton courseId={top.id} compact /></div>}</div>
           <div className="scoreCircle"><strong>{top.totalScore}</strong><span>/100 fit score</span></div>
         </div>
         <div className="scoreBreakdown">
@@ -94,19 +100,19 @@ export default function ResultsPage() {
 
       <section className="resultsLayout shell">
         <div className="resultsList">
-          <div className="listTitle"><h2>All recommendations</h2><span>{results.length} {catalogMode === "verified" ? "verified catalogue" : "prototype"} matches</span></div>
+          <div className="listTitle"><h2>All recommendations</h2><span>{results.length} ranked candidate matches</span></div>
           {results.map((result, index) => (
             <article className="resultCard" key={result.id}>
               <div className="resultRank">#{index + 1}</div>
               <div className="resultTop">
-                <div><small>{result.university}</small><h3>{result.course}</h3><div className="courseMeta"><span><MapPin size={14}/>{locationLabel(result)}</span>{result.courseCode && <span>Code {result.courseCode}</span>}{result.cricosCode && <span>CRICOS {result.cricosCode}</span>}</div></div>
+                <div><small>{result.university}</small><h3>{result.course}</h3><div className="courseMeta"><span><MapPin size={14}/>{locationLabel(result)}</span>{regionalStatusLabel(result) && <span>{regionalStatusLabel(result)}</span>}{result.courseCode && <span>Code {result.courseCode}</span>}{result.cricosCode && <span>CRICOS {result.cricosCode}</span>}</div></div>
                 <div className="resultScore"><strong>{result.totalScore}%</strong><span>decision fit</span></div>
               </div>
 
               <div className="costRow">
-                <div><small>ANNUAL TUITION{result.feeYear ? ` (${result.feeYear})` : ""}</small><b>{money(result.annualFee)}</b></div>
+                <div><small>{tuitionLabel(result)}</small><b>{money(result.annualFee)}</b></div>
                 <div><small>EST. LIVING / MONTH</small><b>{money(result.estimatedMonthlyLiving)}</b></div>
-                <div><small>CURRENT-RATE COURSE + LIVING PROJECTION</small><b>{result.estimatedTotalCost === null ? "Pending comparable data" : `~${money(result.estimatedTotalCost)}`}</b></div>
+                <div><small>EST. COURSE + LIVING PROJECTION</small><b>{result.estimatedTotalCost === null ? "Pending comparable data" : `~${money(result.estimatedTotalCost)}`}</b></div>
                 <div><small>VERIFIED PATHWAY EVIDENCE</small><b>{pathwayEvidence(result)}</b></div>
               </div>
 
@@ -155,6 +161,18 @@ function locationLabel(course: CourseCandidate) {
   if (course.city && course.state) return `${course.city}, ${course.state}`;
   if (course.state) return course.state;
   return "Campus pending verification";
+}
+
+function regionalStatusLabel(course: CourseCandidate) {
+  if (!course.state && !course.city) return null;
+  if (!course.regionalVerified) return "Regional status pending";
+  return course.regional ? "Regional" : "Metropolitan";
+}
+
+function tuitionLabel(course: CourseCandidate) {
+  if (course.feeYear) return `ANNUAL TUITION (${course.feeYear})`;
+  if (course.annualFee !== null && course.cricosCode) return "ANNUALISED CRICOS TUITION ESTIMATE";
+  return "ANNUAL TUITION";
 }
 
 function durationLabel(months: number) {
