@@ -1,0 +1,64 @@
+{
+  "snapshot": "2026-08-18-it-001",
+  "source_course_chunk": "data/cricos/chunks/courses-02-information-technology-001.json",
+  "requested_courses": 150,
+  "raw_fee_captures": 149,
+  "importable_records": 146,
+  "minimum_plausible_tuition_aud": 100,
+  "parts": [
+    {
+      "file": "2026-08-18-it-001-01.json",
+      "records": 40,
+      "sha256": "abfd3087405be738aa203ce46bda1bc638aecd01d96283b6f1a538f824bb67d1"
+    },
+    {
+      "file": "2026-08-18-it-001-02.json",
+      "records": 40,
+      "sha256": "3459e65641effc56a99b520d61c12b72da4cf58ffc1440a6369241fba6a15ba2"
+    },
+    {
+      "file": "2026-08-18-it-001-03.json",
+      "records": 40,
+      "sha256": "236f082698893e306a627d2238575d6e3b6ff155dda1057e1de80fac7c5f07f5"
+    },
+    {
+      "file": "2026-08-18-it-001-04.json",
+      "records": 26,
+      "sha256": "c34105fd0ffed7ff131059971236469d38925ba25062abc00d9948387366f5d0"
+    }
+  ],
+  "held_for_review": [
+    {
+      "cricos_code": "031316A",
+      "university": "University of Sydney",
+      "course": "Bachelor of Arts (Informatics)",
+      "observed_tuition_fee_total": null,
+      "reason": "Tuition Fee label/value was not parseable on the live CRICOS detail page",
+      "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=031316a"
+    },
+    {
+      "cricos_code": "078906B",
+      "university": "Monash University",
+      "course": "Doctor of Philosophy (Warwick-Monash)",
+      "observed_tuition_fee_total": 0,
+      "reason": "Live CRICOS page produced a zero tuition value; excluded from affordability scoring",
+      "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=078906b"
+    },
+    {
+      "cricos_code": "084616F",
+      "university": "Monash University",
+      "course": "Doctor of Philosophy (Southeast- Monash)",
+      "observed_tuition_fee_total": 0,
+      "reason": "Live CRICOS page produced a zero tuition value; excluded from affordability scoring",
+      "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=084616f"
+    },
+    {
+      "cricos_code": "111357C",
+      "university": "Monash University",
+      "course": "Master of Philosophy (Southeast - Monash)",
+      "observed_tuition_fee_total": 1,
+      "reason": "Live CRICOS page produced a placeholder-level 1 AUD tuition value; manual review required",
+      "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=111357c"
+    }
+  ]
+}
