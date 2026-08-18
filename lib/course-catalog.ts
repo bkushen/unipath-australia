@@ -8,6 +8,9 @@ type RawCourse = {
   duration_months: number | null;
   annual_fee: number | string | null;
   cricos_code: string | null;
+  cricos_field_1_broad: string | null;
+  cricos_tuition_fee_total: number | string | null;
+  cricos_duration_weeks: number | string | null;
   university_course_code: string | null;
   source_url: string | null;
   verification_status: string;
@@ -25,6 +28,7 @@ type RawCourse = {
       city: string;
       state: string;
       regional: boolean;
+      regional_verified: boolean;
       living_costs: Array<{
         category: string;
         monthly_estimate: number | string | null;
@@ -56,9 +60,32 @@ const asNumber = (value: number | string | null | undefined) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]> {
+const broadFieldFromProfile = (field: string) => {
+  const text = field.trim().toLowerCase();
+  if (!text) return null;
+
+  const groups: Array<[string, string[]]> = [
+    ["02 - Information Technology", ["information technology", "software", "computer", "cyber", "data science", "artificial intelligence", "machine learning", "cloud", "network", "ict", "developer"]],
+    ["03 - Engineering and Related Technologies", ["engineering", "mechanical", "civil", "electrical", "electronic", "mechatronic", "automotive", "aerospace"]],
+    ["04 - Architecture and Building", ["architecture", "building", "construction", "quantity surveying"]],
+    ["05 - Agriculture, Environmental and Related Studies", ["agriculture", "environment", "environmental", "forestry", "fisheries"]],
+    ["06 - Health", ["health", "nursing", "medicine", "medical", "pharmacy", "dentistry", "physiotherapy", "occupational therapy", "public health"]],
+    ["07 - Education", ["education", "teaching", "teacher", "early childhood"]],
+    ["08 - Management and Commerce", ["business", "management", "commerce", "accounting", "finance", "marketing", "human resources", "economics", "mba"]],
+    ["09 - Society and Culture", ["law", "psychology", "social", "sociology", "politics", "international relations", "criminology", "humanities", "language"]],
+    ["10 - Creative Arts", ["design", "creative", "arts", "music", "film", "media", "visual art"]],
+    ["01 - Natural and Physical Sciences", ["science", "biology", "chemistry", "physics", "mathematics", "biotechnology"]],
+    ["11 - Food, Hospitality and Personal Services", ["hospitality", "cookery", "culinary", "food service"]],
+  ];
+
+  return groups.find(([, keywords]) => keywords.some((keyword) => text.includes(keyword)))?.[0] ?? null;
+};
+
+export async function loadVerifiedCourseCandidates(profileField = ""): Promise<CourseCandidate[]> {
   const supabase = createClient();
-  const { data, error } = await supabase
+  const broadField = broadFieldFromProfile(profileField);
+
+  let query = supabase
     .from("courses")
     .select(`
       id,
@@ -67,6 +94,9 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
       duration_months,
       annual_fee,
       cricos_code,
+      cricos_field_1_broad,
+      cricos_tuition_fee_total,
+      cricos_duration_weeks,
       university_course_code,
       source_url,
       verification_status,
@@ -79,6 +109,7 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
           city,
           state,
           regional,
+          regional_verified,
           living_costs(category, monthly_estimate, verification_status)
         )
       ),
@@ -92,8 +123,15 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
         )
       )
     `)
-    .eq("verification_status", "VERIFIED");
+    .eq("verification_status", "VERIFIED")
+    .or("cricos_expired.is.null,cricos_expired.eq.false")
+    .limit(broadField ? 500 : 300);
 
+  if (broadField) {
+    query = query.or(`cricos_field_1_broad.eq.${broadField},cricos_field_1_broad.is.null`);
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
 
   return ((data ?? []) as unknown as RawCourse[]).map((row) => {
@@ -101,7 +139,14 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
       .filter((fee) => fee.student_type === "international" && fee.verification_status === "VERIFIED")
       .sort((a, b) => b.fee_year - a.fee_year)[0];
 
-    const annualFee = asNumber(latestInternationalFee?.annual_fee) ?? asNumber(row.annual_fee);
+    const verifiedAnnualFee = asNumber(latestInternationalFee?.annual_fee) ?? asNumber(row.annual_fee);
+    const cricosTotalTuition = asNumber(row.cricos_tuition_fee_total);
+    const cricosDurationWeeks = asNumber(row.cricos_duration_weeks);
+    const cricosAnnualisedFee = cricosTotalTuition !== null && cricosDurationWeeks !== null && cricosDurationWeeks > 0
+      ? Math.round(cricosTotalTuition / (cricosDurationWeeks / 52))
+      : null;
+    const annualFee = verifiedAnnualFee ?? cricosAnnualisedFee;
+
     const campus = row.course_campuses.find((item) => item.campuses)?.campuses ?? null;
     const livingValues = (campus?.living_costs ?? [])
       .filter((item) => item.verification_status !== "UNVERIFIED")
@@ -126,7 +171,7 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
         return `${occupation.name}${subclasses.length ? ` (${subclasses.join(", ")})` : ""}`;
       });
 
-    const field = row.study_fields?.name ?? "";
+    const field = row.study_fields?.name ?? row.cricos_field_1_broad ?? "";
     const accreditation = row.course_accreditations
       .map((item) => item.status ? `${item.body_name} — ${item.status}` : item.body_name)
       .join("; ") || null;
@@ -140,6 +185,7 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
       state: campus?.state ?? "",
       city: campus?.city ?? "",
       regional: campus?.regional ?? false,
+      regionalVerified: campus?.regional_verified ?? false,
       annualFee,
       durationMonths: row.duration_months ?? 0,
       estimatedMonthlyLiving,
@@ -151,7 +197,7 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
       verificationStatus: row.verification_status === "VERIFIED" ? "VERIFIED" : "ESTIMATED",
       courseCode: row.university_course_code,
       cricosCode: row.cricos_code,
-      feeYear: latestInternationalFee?.fee_year ?? null,
+      feeYear: verifiedAnnualFee !== null ? latestInternationalFee?.fee_year ?? null : null,
       sourceUrl: row.source_url,
       accreditation,
       campusName: campus?.name ?? null,
