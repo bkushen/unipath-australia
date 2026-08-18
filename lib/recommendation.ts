@@ -28,6 +28,8 @@ export type CourseCandidate = {
   careerTags: string[];
   backgroundTags: string[];
   migrationAlignment: "Strong" | "Moderate" | "Limited" | "Unknown";
+  migrationEvidenceCount?: number;
+  migrationEvidenceLabels?: string[];
   scholarshipNote?: string;
   verificationStatus: "DEMO" | "VERIFIED" | "ESTIMATED";
   courseCode?: string | null;
@@ -159,6 +161,10 @@ export function scoreCourse(profile: StudentAssessment, course: CourseCandidate)
 
   if (["return", "temporary", "unsure"].includes(profile.migrationGoal)) {
     migration = 70;
+  } else if (migrationImportant && (course.migrationEvidenceCount ?? 0) > 0) {
+    migration = Math.max(migration, 68);
+    reasons.push(`Verified skilled-occupation evidence is available for ${course.migrationEvidenceCount} conservative course link${course.migrationEvidenceCount === 1 ? "" : "s"}`);
+    cautions.push("Migration evidence availability is not a visa, nomination, invitation or skills-assessment probability");
   } else if (migrationImportant && course.migrationAlignment === "Unknown") {
     cautions.push("Verified occupation-to-visa pathway analysis is still pending for this course");
   } else if (migrationImportant) {
