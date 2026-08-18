@@ -1,0 +1,71 @@
+name: Promote validated IT fee batch 005
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/promote-fee-it005.yml"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  promote:
+    if: github.event.pull_request.head.ref == 'agent/fee-it005-snapshot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/fee-it005-snapshot
+          fetch-depth: 1
+
+      - name: Download existing validated artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${GITHUB_REPOSITORY}/actions/artifacts/9311524425/zip > /tmp/cricos-fee-it-005.zip
+          echo "ba87820665ef10817ea079a87f3cb4c5bd9061527d0bc4b156f34d363d4ae2c7  /tmp/cricos-fee-it-005.zip" | sha256sum -c -
+          mkdir -p /tmp/fee005
+          unzip -q /tmp/cricos-fee-it-005.zip -d /tmp/fee005
+          echo "2fe2f589611a189f97f8229d472092c4d5d5813eb93c6541817f871f2b94227f  /tmp/fee005/cricos-fee-it-005.json" | sha256sum -c -
+
+      - name: Revalidate exact snapshot
+        env:
+          FEE_FILE: /tmp/fee005/cricos-fee-it-005.json
+          MIN_PLAUSIBLE_TUITION: 100
+        run: node scripts/validate-cricos-fee-snapshot.mjs
+
+      - name: Promote snapshot and audit manifest
+        run: |
+          mkdir -p data/cricos/fees
+          cp /tmp/fee005/cricos-fee-it-005.json data/cricos/fees/2026-08-18-it-005.json
+          cat > data/cricos/fees/2026-08-18-it-005-manifest.json <<'JSON'
+          {
+            "source_batch": "data/cricos/chunks/courses-02-information-technology-005.json",
+            "requested": 150,
+            "captured_and_validated": 149,
+            "held_for_review": 1,
+            "minimum_plausible_tuition_aud": 100,
+            "artifact_id": 9311524425,
+            "workflow_run_id": 32100868032,
+            "artifact_zip_sha256": "ba87820665ef10817ea079a87f3cb4c5bd9061527d0bc4b156f34d363d4ae2c7",
+            "snapshot_sha256": "2fe2f589611a189f97f8229d472092c4d5d5813eb93c6541817f871f2b94227f",
+            "tuition_min_aud": 19920,
+            "tuition_max_aud": 261900,
+            "held_records": [
+              {"cricos_code":"056083G","reason":"CRICOS tuition 0; held by plausibility guard"}
+            ]
+          }
+          JSON
+          rm .github/workflows/promote-fee-it005.yml
+
+      - name: Commit exact audited snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add audited fifth IT CRICOS fee snapshot"
+          git push origin HEAD:agent/fee-it005-snapshot
