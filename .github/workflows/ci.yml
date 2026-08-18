@@ -14,7 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Download and inspect CRICOS snapshot
+      - name: Download and inspect CRICOS CSV snapshot
         shell: bash
         run: |
           python - <<'PY'
@@ -23,46 +23,56 @@ jobs:
           import json
           import pathlib
           import urllib.request
-          import zipfile
 
-          url = "https://data.gov.au/data/dataset/e5ae7059-bfa8-4fa4-a5c0-c13cf3520193/resource/63fd9610-5bea-438c-bac7-29289d38cfbb/download/cricos-providers-courses-locations.zip"
+          resources = {
+              "institutions.csv": "https://data.gov.au/data/dataset/e5ae7059-bfa8-4fa4-a5c0-c13cf3520193/resource/7f6941f3-5327-4db7-b556-5f16d77f63c1/download/cricos-institutions.csv",
+              "courses.csv": "https://data.gov.au/data/dataset/e5ae7059-bfa8-4fa4-a5c0-c13cf3520193/resource/48cacf69-2082-415e-9595-f17d0c3a4af0/download/cricos-courses.csv",
+              "locations.csv": "https://data.gov.au/data/dataset/e5ae7059-bfa8-4fa4-a5c0-c13cf3520193/resource/45d29535-1360-4486-8242-3850e61b5524/download/cricos-locations.csv",
+              "course-locations.csv": "https://data.gov.au/data/dataset/e5ae7059-bfa8-4fa4-a5c0-c13cf3520193/resource/4cd2de02-8ba3-4eb2-bac2-fe272cae3f5f/download/cricos-course-locations.csv",
+          }
+
           out = pathlib.Path("cricos-snapshot")
           out.mkdir(exist_ok=True)
-          zip_path = pathlib.Path("cricos.zip")
+          inspection = {"snapshot_note": "Current CSV resources published by the Australian Government CRICOS dataset", "files": []}
 
-          request = urllib.request.Request(url, headers={"User-Agent": "UniPath-Australia-Data-Importer/0.1"})
-          with urllib.request.urlopen(request, timeout=60) as response:
-              zip_path.write_bytes(response.read())
+          for filename, url in resources.items():
+              path = out / filename
+              request = urllib.request.Request(url, headers={"User-Agent": "UniPath-Australia-Data-Importer/0.1"})
+              with urllib.request.urlopen(request, timeout=90) as response:
+                  raw = response.read()
+              path.write_bytes(raw)
 
-          inspection = {"source_url": url, "files": []}
-          with zipfile.ZipFile(zip_path) as archive:
-              archive.extractall(out)
+              text = None
+              encoding = None
+              for candidate in ("utf-8-sig", "utf-8", "cp1252"):
+                  try:
+                      text = raw.decode(candidate)
+                      encoding = candidate
+                      break
+                  except UnicodeDecodeError:
+                      pass
+              if text is None:
+                  text = raw.decode("utf-8", errors="replace")
+                  encoding = "utf-8-replace"
 
-          for path in sorted(out.rglob("*")):
-              if not path.is_file():
-                  continue
-              record = {"file": str(path.relative_to(out)), "bytes": path.stat().st_size}
-              if path.suffix.lower() == ".csv":
-                  raw = path.read_bytes()
-                  text = None
-                  encoding = None
-                  for candidate in ("utf-8-sig", "utf-8", "cp1252"):
-                      try:
-                          text = raw.decode(candidate)
-                          encoding = candidate
-                          break
-                      except UnicodeDecodeError:
-                          pass
-                  if text is None:
-                      text = raw.decode("utf-8", errors="replace")
-                      encoding = "utf-8-replace"
-                  reader = csv.reader(io.StringIO(text))
-                  rows = list(reader)
-                  record["encoding"] = encoding
-                  record["row_count_including_header"] = len(rows)
-                  record["header"] = rows[0] if rows else []
-                  record["sample_rows"] = rows[1:4]
-              inspection["files"].append(record)
+              reader = csv.reader(io.StringIO(text))
+              header = next(reader, [])
+              samples = []
+              row_count = 0
+              for row in reader:
+                  row_count += 1
+                  if len(samples) < 5:
+                      samples.append(row)
+
+              inspection["files"].append({
+                  "file": filename,
+                  "source_url": url,
+                  "bytes": len(raw),
+                  "encoding": encoding,
+                  "data_row_count": row_count,
+                  "header": header,
+                  "sample_rows": samples,
+              })
 
           pathlib.Path("cricos-inspection.json").write_text(json.dumps(inspection, indent=2, ensure_ascii=False), encoding="utf-8")
           print(json.dumps(inspection, indent=2, ensure_ascii=False))
@@ -75,7 +85,7 @@ jobs:
           path: cricos-inspection.json
           retention-days: 1
 
-      - name: Upload extracted CRICOS snapshot
+      - name: Upload CRICOS CSV snapshot
         uses: actions/upload-artifact@v7
         with:
           name: cricos-bulk-snapshot
