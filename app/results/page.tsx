@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, BriefcaseBusiness, CheckCircle2, DollarSign, ExternalLink, GraduationCap, MapPin, Route, ShieldCheck } from "lucide-react";
+import SaveCourseButton from "@/components/SaveCourseButton";
 import { demoCourses } from "@/lib/demo-courses";
 import { loadVerifiedCourseCandidates } from "@/lib/course-catalog";
 import { rankCourses, type CourseCandidate, type StudentAssessment } from "@/lib/recommendation";
@@ -83,7 +84,7 @@ export default function ResultsPage() {
       {top && <section className="bestMatch shell">
         <div className="bestBadge">BEST CURRENT MATCH</div>
         <div className="bestMain">
-          <div><p>{top.university}</p><h2>{top.course}</h2><div className="courseMeta"><span><MapPin size={15}/>{locationLabel(top)}</span><span><GraduationCap size={15}/>{durationLabel(top.durationMonths)}</span>{top.state && <span>{top.regional ? "Regional" : "Metropolitan"}</span>}</div>{catalogMode === "verified" && <a className="bestDetailsLink" href={`/courses/${top.id}`}>Open full course details →</a>}</div>
+          <div><p>{top.university}</p><h2>{top.course}</h2><div className="courseMeta"><span><MapPin size={15}/>{locationLabel(top)}</span><span><GraduationCap size={15}/>{durationLabel(top.durationMonths)}</span>{top.state && <span>{top.regional ? "Regional" : "Metropolitan"}</span>}</div>{catalogMode === "verified" && <div className="bestMatchActions"><a className="bestDetailsLink" href={`/courses/${top.id}`}>Open full course details →</a><SaveCourseButton courseId={top.id} compact /></div>}</div>
           <div className="scoreCircle"><strong>{top.totalScore}</strong><span>/100 fit score</span></div>
         </div>
         <div className="scoreBreakdown">
@@ -112,6 +113,7 @@ export default function ResultsPage() {
               {(result.accreditation || result.sourceUrl || catalogMode === "verified") && <div className="evidenceRow">
                 <div className="evidenceMeta">{result.accreditation && <span><ShieldCheck size={14}/>{result.accreditation}</span>}</div>
                 <div className="evidenceActions">
+                  {catalogMode === "verified" && <SaveCourseButton courseId={result.id} compact />}
                   {catalogMode === "verified" && <a href={`/courses/${result.id}`}>Course details →</a>}
                   {catalogMode === "verified" && index > 0 && top && <a href={`/compare?ids=${top.id},${result.id}`}>Compare with #1 →</a>}
                   {result.sourceUrl && <a href={result.sourceUrl} target="_blank" rel="noreferrer">Official source <ExternalLink size={13}/></a>}
