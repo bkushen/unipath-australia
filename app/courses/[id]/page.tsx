@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, BriefcaseBusiness, CalendarDays, DollarSign, ExternalLink, GraduationCap, MapPin, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, BriefcaseBusiness, CalendarDays, DollarSign, ExternalLink, GraduationCap, MapPin, Route, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +33,22 @@ type CourseDetail = {
   course_accreditations: Array<{ body_name: string; accreditation_level: string | null; status: string | null; valid_from: string | null; valid_to: string | null; source_url: string | null }>;
   course_intakes: Array<{ month: number; year: number }>;
   course_scholarships: Array<{ scholarships: { name: string; amount: number | null; percentage: number | null; eligibility: string | null; source_url: string | null } | null }>;
+};
+
+type MigrationLink = {
+  evidence_basis: string;
+  confidence: string;
+  notes: string | null;
+  skilled_occupations: {
+    name: string;
+    assessing_authority: string | null;
+    source_url: string;
+    skilled_occupation_codes: Array<{ anzsco_code: string; anzsco_version: string; program_scope: string }>;
+    skilled_occupation_lists: Array<{ list_code: string }>;
+    skilled_occupation_programs: Array<{
+      migration_programs: { subclass: string; name: string; stream: string; pathway_type: string } | null;
+    }>;
+  } | null;
 };
 
 const money = (value: number | null) => value === null
@@ -72,7 +88,26 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
     .maybeSingle();
 
   if (error || !data) notFound();
+
+  const { data: migrationData } = await supabase
+    .from("course_skilled_occupation_links")
+    .select(`
+      evidence_basis,
+      confidence,
+      notes,
+      skilled_occupations(
+        name,
+        assessing_authority,
+        source_url,
+        skilled_occupation_codes(anzsco_code, anzsco_version, program_scope),
+        skilled_occupation_lists(list_code),
+        skilled_occupation_programs(migration_programs(subclass, name, stream, pathway_type))
+      )
+    `)
+    .eq("course_id", id);
+
   const course = data as unknown as CourseDetail;
+  const migrationLinks = (migrationData ?? []) as unknown as MigrationLink[];
   const campus = course.course_campuses.find((item) => item.campuses)?.campuses ?? null;
   const livingCost = campus?.living_costs.find((item) => item.verification_status !== "UNVERIFIED") ?? null;
   const latestFee = course.course_fees
@@ -132,6 +167,21 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
             {careers.length ? <div className="tagCloud">{careers.map((career) => <span key={career.name}>{career.name}</span>)}</div> : <EmptyText text="Verified career-outcome records are not available yet." />}
           </CourseSection>
 
+          <CourseSection icon={<Route/>} title="Skilled migration pathway evidence">
+            {migrationLinks.length ? <div className="migrationList">{migrationLinks.map((link) => {
+              const occupation = link.skilled_occupations;
+              if (!occupation) return null;
+              const programs = occupation.skilled_occupation_programs.map((item) => item.migration_programs).filter((item): item is NonNullable<typeof item> => Boolean(item));
+              return <article className="migrationCard" key={occupation.name}>
+                <div className="migrationCardHead"><div><small>{link.confidence} EVIDENCE · {link.evidence_basis}</small><h3>{occupation.name}</h3><span>Assessing authority: {occupation.assessing_authority ?? "Pending"}</span></div><a href={occupation.source_url} target="_blank" rel="noreferrer">Home Affairs source <ExternalLink size={12}/></a></div>
+                <div className="migrationMeta"><div><b>ANZSCO</b><span>{occupation.skilled_occupation_codes.map((code) => `${code.anzsco_code} (${code.anzsco_version})`).join(", ")}</span></div><div><b>Lists</b><span>{occupation.skilled_occupation_lists.map((item) => item.list_code).join(", ") || "Not recorded"}</span></div></div>
+                <div className="programTags">{programs.map((program) => <span key={`${program.subclass}-${program.stream}`}>{program.subclass} · {program.name}{program.stream ? ` (${program.stream})` : ""}</span>)}</div>
+                <p>{link.notes}</p>
+              </article>;
+            })}</div> : <EmptyText text="No course-to-skilled-occupation correspondence has been verified yet. UniPath will not infer a PR pathway simply from the degree title." />}
+            <div className="detailNotice">A listed occupation or visa program does not mean you qualify for that occupation, skills assessment, nomination, invitation or visa. State nomination criteria, points, work experience and occupation tasks must be checked separately against current official rules.</div>
+          </CourseSection>
+
           <CourseSection icon={<ShieldCheck/>} title="Professional accreditation">
             {course.course_accreditations.length ? <div className="accreditationList">{course.course_accreditations.map((item) => <div key={item.body_name}><ShieldCheck/><div><b>{item.body_name}</b><span>{[item.accreditation_level,item.status].filter(Boolean).join(" · ")}</span></div></div>)}</div> : <EmptyText text="No verified accreditation record has been loaded yet." />}
           </CourseSection>
@@ -151,8 +201,9 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
             <div><ShieldCheck/><span><b>Course record</b>Verified</span></div>
             <div><ShieldCheck/><span><b>University source</b>{course.source_url ? "Available" : "Pending"}</span></div>
             <div><ShieldCheck/><span><b>Living cost</b>{livingCost ? `${livingCost.verification_status.toLowerCase()} source range` : "Pending comparable source"}</span></div>
+            <div><ShieldCheck/><span><b>Migration evidence</b>{migrationLinks.length ? `${migrationLinks.length} conservative occupation link${migrationLinks.length === 1 ? "" : "s"}` : "Pending verified mapping"}</span></div>
             <div><ShieldCheck/><span><b>Last database verification</b>{course.verified_at ? new Date(course.verified_at).toLocaleDateString("en-AU") : "Pending"}</span></div>
-            <p>Migration pathway analysis is intentionally not displayed until occupation codes, assessing authorities and current visa eligibility have been verified against government sources.</p>
+            <p>UniPath separates university career outcomes from Home Affairs skilled occupations and never treats course completion as a guarantee of permanent residency.</p>
           </div>
         </aside>
       </section>
