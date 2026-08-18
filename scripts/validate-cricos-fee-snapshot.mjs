@@ -3,8 +3,10 @@ import { basename, join } from "node:path";
 
 const feeFile = process.env.FEE_FILE ?? process.argv[2];
 const cricosDir = process.env.CRICOS_DIR ?? "data/cricos";
+const minimumPlausibleTuition = Number(process.env.MIN_PLAUSIBLE_TUITION ?? 100);
 
 if (!feeFile) throw new Error("Provide FEE_FILE or pass the fee snapshot path as the first argument");
+if (!Number.isFinite(minimumPlausibleTuition) || minimumPlausibleTuition < 0) throw new Error("MIN_PLAUSIBLE_TUITION must be zero or positive");
 
 const activeCodes = new Set();
 const courseFiles = (await readdir(cricosDir))
@@ -40,7 +42,9 @@ for (const [index, row] of fees.entries()) {
   if (code) seen.add(code);
   if (code && !activeCodes.has(code)) errors.push(`row ${index + 1}: ${code} is not in the active normalized university catalogue`);
 
-  if (!Number.isFinite(tuition) || tuition <= 0) errors.push(`row ${index + 1} (${code || "unknown"}): tuition must be a positive number`);
+  if (!Number.isFinite(tuition) || tuition <= minimumPlausibleTuition) {
+    errors.push(`row ${index + 1} (${code || "unknown"}): tuition must be above the ${minimumPlausibleTuition} AUD plausibility threshold or be held for manual review`);
+  }
   if (nonTuition !== null && (!Number.isFinite(nonTuition) || nonTuition < 0)) errors.push(`row ${index + 1} (${code || "unknown"}): non-tuition fee must be zero or positive`);
   if (estimatedTotal !== null && (!Number.isFinite(estimatedTotal) || estimatedTotal < tuition)) errors.push(`row ${index + 1} (${code || "unknown"}): estimated total cannot be lower than tuition`);
   if (nonTuition !== null) withNonTuition += 1;
@@ -67,6 +71,7 @@ const summary = {
   with_non_tuition_fee: withNonTuition,
   with_estimated_total_cost: withEstimatedTotal,
   active_catalogue_codes_checked: activeCodes.size,
+  minimum_plausible_tuition: minimumPlausibleTuition,
   errors: errors.length,
 };
 
