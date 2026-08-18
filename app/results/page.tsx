@@ -26,9 +26,15 @@ const money = (value: number | null) => value === null
   ? "Not yet verified"
   : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(value);
 
+type CatalogStats = {
+  scannedCount: number;
+  broadField: string | null;
+};
+
 export default function ResultsPage() {
   const [profile, setProfile] = useState<StudentAssessment>(emptyProfile);
   const [courses, setCourses] = useState<CourseCandidate[]>(demoCourses);
+  const [catalogStats, setCatalogStats] = useState<CatalogStats | null>(null);
   const [catalogMode, setCatalogMode] = useState<"loading" | "verified" | "fallback">("loading");
 
   useEffect(() => {
@@ -44,11 +50,12 @@ export default function ResultsPage() {
     }
 
     let active = true;
-    loadVerifiedCourseCandidates(assessment.field)
-      .then((verified) => {
+    loadVerifiedCourseCandidates(assessment)
+      .then(({ courses: verified, scannedCount, broadField }) => {
         if (!active) return;
         if (verified.length) {
           setCourses(verified);
+          setCatalogStats({ scannedCount, broadField });
           setCatalogMode("verified");
         } else {
           setCatalogMode("fallback");
@@ -79,11 +86,11 @@ export default function ResultsPage() {
           <p>Ranked using academic fit, career alignment, affordability, location preference and available pathway evidence.</p>
         </div>
         {catalogMode === "verified" ? (
-          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Verified course catalogue</b><span>Core course details come from source-dated university and CRICOS records. Missing cost, regional or pathway information stays visibly pending until verified.</span></div></div>
+          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Verified course catalogue</b><span>{verifiedBannerText(catalogStats, results.length)}</span></div></div>
         ) : catalogMode === "fallback" ? (
           <div className="demoBanner"><AlertTriangle size={18}/><div><b>Demo fallback active</b><span>The live verified catalogue could not be loaded, so these results use illustrative records and must not be used for enrolment or migration decisions.</span></div></div>
         ) : (
-          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Loading verified catalogue</b><span>Checking the most relevant source-backed course records for your study area.</span></div></div>
+          <div className="verifiedBanner"><ShieldCheck size={18}/><div><b>Scanning verified catalogue</b><span>Checking the full relevant study field first, then loading richer evidence for the strongest candidate pool.</span></div></div>
         )}
       </section>
 
@@ -100,7 +107,7 @@ export default function ResultsPage() {
 
       <section className="resultsLayout shell">
         <div className="resultsList">
-          <div className="listTitle"><h2>All recommendations</h2><span>{results.length} ranked candidate matches</span></div>
+          <div className="listTitle"><h2>All recommendations</h2><span>{candidateCountLabel(catalogMode, catalogStats, results.length)}</span></div>
           {results.map((result, index) => (
             <article className="resultCard" key={result.id}>
               <div className="resultRank">#{index + 1}</div>
@@ -193,6 +200,17 @@ function pathwayEvidence(course: CourseCandidate) {
     return course.migrationEvidenceLabels?.join("; ") ?? `${course.migrationEvidenceCount} verified link`;
   }
   return "Pending conservative mapping";
+}
+
+function verifiedBannerText(stats: CatalogStats | null, rankedCount: number) {
+  if (!stats) return "Core course details come from source-dated university and CRICOS records. Missing data stays visibly pending until verified.";
+  const field = stats.broadField ? ` in ${stats.broadField.replace(/^\d+\s*-\s*/, "")}` : "";
+  return `Pre-screened ${stats.scannedCount.toLocaleString("en-AU")} verified active courses${field}, then loaded richer evidence for the strongest ${rankedCount.toLocaleString("en-AU")} candidates. Missing cost, regional or pathway information stays visibly pending.`;
+}
+
+function candidateCountLabel(mode: "loading" | "verified" | "fallback", stats: CatalogStats | null, rankedCount: number) {
+  if (mode !== "verified" || !stats) return `${rankedCount} ranked candidate matches`;
+  return `${rankedCount} detailed matches after pre-screening ${stats.scannedCount.toLocaleString("en-AU")} courses`;
 }
 
 function goalLabel(value: string) {
