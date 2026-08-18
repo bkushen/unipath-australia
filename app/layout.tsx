@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./auth.css";
+import "./results-live.css";
 
 export const metadata: Metadata = {
   title: "UniPath Australia | Find Your Australian Study Path",
