@@ -20,6 +20,12 @@ type CourseDetail = {
   university_course_code: string | null;
   cricos_code: string | null;
   duration_months: number | null;
+  cricos_duration_weeks: number | null;
+  cricos_tuition_fee_total: number | null;
+  cricos_non_tuition_fee_total: number | null;
+  cricos_estimated_total_cost: number | null;
+  cricos_fee_source_url: string | null;
+  cricos_fee_verified_at: string | null;
   description: string | null;
   delivery_mode: string | null;
   source_url: string | null;
@@ -69,6 +75,12 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
       university_course_code,
       cricos_code,
       duration_months,
+      cricos_duration_weeks,
+      cricos_tuition_fee_total,
+      cricos_non_tuition_fee_total,
+      cricos_estimated_total_cost,
+      cricos_fee_source_url,
+      cricos_fee_verified_at,
       description,
       delivery_mode,
       source_url,
@@ -113,6 +125,15 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
   const latestFee = course.course_fees
     .filter((fee) => fee.student_type === "international" && fee.verification_status === "VERIFIED")
     .sort((a, b) => b.fee_year - a.fee_year)[0] ?? null;
+  const cricosAnnualisedFee = course.cricos_tuition_fee_total !== null && course.cricos_duration_weeks !== null && course.cricos_duration_weeks > 0
+    ? Math.round(course.cricos_tuition_fee_total / (course.cricos_duration_weeks / 52))
+    : null;
+  const displayedAnnualFee = latestFee?.annual_fee ?? cricosAnnualisedFee;
+  const displayedFeeLabel = latestFee
+    ? `Annual university fee · ${latestFee.fee_year}`
+    : cricosAnnualisedFee !== null
+      ? "Annualised from current CRICOS whole-course tuition"
+      : "Fee verification pending";
   const requirements = course.entry_requirements[0] ?? null;
   const careers = course.course_occupations.map((item) => item.occupations).filter((item): item is NonNullable<typeof item> => Boolean(item));
   const intakes = [...course.course_intakes].sort((a, b) => a.year - b.year || a.month - b.month);
@@ -138,13 +159,14 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
           </div>
         </div>
         <aside className="courseFactCard">
-          <small>LATEST VERIFIED INTERNATIONAL FEE</small>
-          <strong>{money(latestFee?.annual_fee ?? null)}</strong>
-          <span>{latestFee ? `Annual fee · ${latestFee.fee_year}` : "Fee verification pending"}</span>
+          <small>{latestFee ? "LATEST VERIFIED INTERNATIONAL FEE" : "ANNUALISED TUITION COMPARISON"}</small>
+          <strong>{money(displayedAnnualFee)}</strong>
+          <span>{displayedFeeLabel}</span>
           <div><b>Course code</b><span>{course.university_course_code ?? "Pending"}</span></div>
           <div><b>CRICOS</b><span>{course.cricos_code ?? "Pending verification"}</span></div>
           <div><b>Study area</b><span>{course.study_fields?.name ?? "Pending"}</span></div>
           {course.source_url && <a href={course.source_url} target="_blank" rel="noreferrer">Official university source <ExternalLink size={13}/></a>}
+          {!course.source_url && course.cricos_fee_source_url && <a href={course.cricos_fee_source_url} target="_blank" rel="noreferrer">Official CRICOS fee source <ExternalLink size={13}/></a>}
         </aside>
       </section>
 
@@ -152,11 +174,12 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
         <div className="courseMainColumn">
           <CourseSection icon={<DollarSign/>} title="Fees and affordability">
             <div className="detailGrid">
-              {course.course_fees.length ? course.course_fees.sort((a,b)=>b.fee_year-a.fee_year).map((fee) => <div className="detailTile" key={`${fee.fee_year}-${fee.student_type}`}><small>{fee.fee_year} · {fee.student_type}</small><strong>{money(fee.annual_fee)}</strong><span>{fee.notes ?? "Annual tuition record"}</span></div>) : <EmptyText text="International tuition data is still being verified." />}
+              {course.course_fees.length ? course.course_fees.sort((a,b)=>b.fee_year-a.fee_year).map((fee) => <div className="detailTile" key={`${fee.fee_year}-${fee.student_type}`}><small>{fee.fee_year} · {fee.student_type}</small><strong>{money(fee.annual_fee)}</strong><span>{fee.notes ?? "Annual tuition record"}</span>{fee.source_url && <a className="tileSource" href={fee.source_url} target="_blank" rel="noreferrer">University fee source <ExternalLink size={12}/></a>}</div>) : course.cricos_tuition_fee_total === null ? <EmptyText text="International tuition data is still being verified." /> : null}
+              {course.cricos_tuition_fee_total !== null && <div className="detailTile"><small>CRICOS WHOLE-COURSE TUITION</small><strong>{money(course.cricos_tuition_fee_total)}</strong><span>{cricosFeeSummary(course, cricosAnnualisedFee)}</span>{course.cricos_fee_source_url && <a className="tileSource" href={course.cricos_fee_source_url} target="_blank" rel="noreferrer">Official CRICOS fee source <ExternalLink size={12}/></a>}</div>}
               {livingCost && <div className="detailTile"><small>{livingCost.verification_status} LOCATION BUDGET</small><strong>{livingRange(livingCost)}</strong><span>{livingCost.monthly_estimate !== null ? `Indicative midpoint ${money(livingCost.monthly_estimate)}/month. Actual spending varies by lifestyle and housing.` : "Indicative source range."}</span>{livingCost.source_url && <a className="tileSource" href={livingCost.source_url} target="_blank" rel="noreferrer">Living-cost source <ExternalLink size={12}/></a>}</div>}
             </div>
             {!livingCost && <div className="detailNotice">A comparable source-backed living-cost estimate has not yet been loaded for this campus. UniPath will not manufacture a total-study-cost figure.</div>}
-            {livingCost && <div className="detailNotice">Living costs are estimates, not visa financial-capacity amounts or guaranteed spending. Tuition may also change in later academic years, so UniPath does not multiply one year&apos;s fee into a falsely precise whole-degree total.</div>}
+            {livingCost && <div className="detailNotice">Living costs are estimates, not visa financial-capacity amounts or guaranteed spending. University annual fees may change in later academic years. When a current CRICOS whole-course tuition amount is available, UniPath keeps that value separate from annual university fee records.</div>}
           </CourseSection>
 
           <CourseSection icon={<BadgeCheck/>} title="Entry requirements">
@@ -200,8 +223,10 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
             <h3>Data confidence</h3>
             <div><ShieldCheck/><span><b>Course record</b>Verified</span></div>
             <div><ShieldCheck/><span><b>University source</b>{course.source_url ? "Available" : "Pending"}</span></div>
+            <div><ShieldCheck/><span><b>Tuition evidence</b>{latestFee ? `University annual fee · ${latestFee.fee_year}` : course.cricos_tuition_fee_total !== null ? "Current CRICOS whole-course tuition" : "Pending"}</span></div>
             <div><ShieldCheck/><span><b>Living cost</b>{livingCost ? `${livingCost.verification_status.toLowerCase()} source range` : "Pending comparable source"}</span></div>
             <div><ShieldCheck/><span><b>Migration evidence</b>{migrationLinks.length ? `${migrationLinks.length} conservative occupation link${migrationLinks.length === 1 ? "" : "s"}` : "Pending verified mapping"}</span></div>
+            <div><ShieldCheck/><span><b>Fee verification date</b>{course.cricos_fee_verified_at ? new Date(course.cricos_fee_verified_at).toLocaleDateString("en-AU") : latestFee ? `Fee year ${latestFee.fee_year}` : "Pending"}</span></div>
             <div><ShieldCheck/><span><b>Last database verification</b>{course.verified_at ? new Date(course.verified_at).toLocaleDateString("en-AU") : "Pending"}</span></div>
             <p>UniPath separates university career outcomes from Home Affairs skilled occupations and never treats course completion as a guarantee of permanent residency.</p>
           </div>
@@ -226,4 +251,13 @@ function livingRange(cost: LivingCost) {
     return `${money(annualLow)}–${money(annualHigh)}/year`;
   }
   return cost.monthly_estimate !== null ? `${money(cost.monthly_estimate)}/month` : "Estimate pending";
+}
+
+function cricosFeeSummary(course: CourseDetail, annualisedFee: number | null) {
+  const parts = [
+    annualisedFee !== null ? `Annualised comparison ${money(annualisedFee)}/year across ${course.cricos_duration_weeks} weeks` : null,
+    course.cricos_non_tuition_fee_total !== null ? `non-tuition ${money(course.cricos_non_tuition_fee_total)}` : null,
+    course.cricos_estimated_total_cost !== null ? `CRICOS estimated total course cost ${money(course.cricos_estimated_total_cost)}` : null,
+  ].filter((value): value is string => Boolean(value));
+  return `${parts.join(" · ")}. Whole-course CRICOS tuition is kept separate from university academic-year fees.`;
 }
