@@ -4,6 +4,7 @@ import "./auth.css";
 import "./results-live.css";
 import "./course-detail.css";
 import "./compare.css";
+import "./save-course.css";
 
 export const metadata: Metadata = {
   title: "UniPath Australia | Find Your Australian Study Path",
