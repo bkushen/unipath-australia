@@ -2,17 +2,29 @@ import { redirect } from "next/navigation";
 import { Bookmark, ClipboardCheck, GraduationCap, LogOut, Route } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 
+type SavedCourseRow = {
+  id: string;
+  course_id: string;
+  courses: {
+    name: string;
+    universities: { name: string } | null;
+  } | null;
+};
+
 export default async function DashboardPage() {
   const supabase = await createClient();
   const { data: claimsData } = await supabase.auth.getClaims();
   const userId = claimsData?.claims?.sub;
   if (!userId) redirect("/login");
 
-  const [{ data: profile }, { data: assessments }, { data: saved }] = await Promise.all([
+  const [{ data: profile }, { data: assessments }, { data: savedData }] = await Promise.all([
     supabase.from("student_profiles").select("highest_qualification, qualification_field, desired_occupation, preferred_states, migration_goal").eq("user_id", userId).maybeSingle(),
     supabase.from("assessments").select("id, created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(5),
-    supabase.from("saved_courses").select("id").eq("user_id", userId),
+    supabase.from("saved_courses").select("id, course_id, courses(name, universities(name))").eq("user_id", userId).order("created_at", { ascending: false }),
   ]);
+
+  const saved = (savedData ?? []) as unknown as SavedCourseRow[];
+  const compareIds = saved.slice(0, 4).map((item) => item.course_id).join(",");
 
   return (
     <main className="dashboardPage">
@@ -36,8 +48,13 @@ export default async function DashboardPage() {
         </article>
 
         <article className="dashCard"><ClipboardCheck/><small>ASSESSMENTS</small><strong>{assessments?.length ?? 0}</strong><span>Recent assessments saved</span><a href="/assessment">Run a new assessment →</a></article>
-        <article className="dashCard"><Bookmark/><small>SAVED COURSES</small><strong>{saved?.length ?? 0}</strong><span>Courses on your shortlist</span><a href="/results">View recommendations →</a></article>
+        <article className="dashCard"><Bookmark/><small>SAVED COURSES</small><strong>{saved.length}</strong><span>Courses on your shortlist</span><a href="#shortlist">Open shortlist →</a></article>
         <article className="dashCard"><Route/><small>PATHWAY GOAL</small><strong className="textStrong">{profile?.migration_goal || "Not set"}</strong><span>Migration information remains educational and source-dated.</span></article>
+      </section>
+
+      <section className="recentPanel shell" id="shortlist">
+        <div className="panelHeading"><div><p className="sectionLabel">SHORTLIST</p><h2>Saved courses</h2></div>{saved.length >= 2 && <a className="secondary" href={`/compare?ids=${compareIds}`}>Compare saved courses</a>}</div>
+        {saved.length ? <div className="savedCourseList">{saved.map((item) => <a href={`/courses/${item.course_id}`} key={item.id}><div><b>{item.courses?.name ?? "Course"}</b><span>{item.courses?.universities?.name ?? "University"}</span></div><small>Open details →</small></a>)}</div> : <div className="emptyState">No courses saved yet. Open your recommendations and use “Save course” to build a shortlist.</div>}
       </section>
 
       <section className="recentPanel shell">
