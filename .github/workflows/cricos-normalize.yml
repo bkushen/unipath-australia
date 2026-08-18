@@ -16,14 +16,21 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
 
-      - name: Normalize current provider-capacity header variants
+      - name: Normalize current provider header variants
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
           path = Path('scripts/normalize_cricos.py')
           text = path.read_text()
-          text = text.replace('number(row["Number of Students"])', 'number(row.get("Number of Students") or row.get("Total Capacity"))')
+          replacements = {
+              'number(row["Number of Students"])': 'number(row.get("Number of Students") or row.get("Total Capacity") or row.get("Institution Capacity"))',
+              'row["Postal City"] or None': '(row.get("Postal City") or row.get("Postal Address City")) or None',
+              'row["Postal State"] or None': '(row.get("Postal State") or row.get("Postal Address State")) or None',
+              'row["Postal Postcode"] or None': '(row.get("Postal Postcode") or row.get("Postal Address Postcode")) or None',
+          }
+          for old, new in replacements.items():
+              text = text.replace(old, new)
           path.write_text(text)
           PY
 
