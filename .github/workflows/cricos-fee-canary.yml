@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "scripts/fetch-cricos-fees.mjs"
+      - "scripts/validate-cricos-fee-snapshot.mjs"
       - "supabase/migrations/**"
       - ".github/workflows/cricos-fee-canary.yml"
 
@@ -32,6 +33,11 @@ jobs:
           OFFSET: 0
           DELAY_MS: 500
         run: node scripts/fetch-cricos-fees.mjs
+
+      - name: Validate captured fee snapshot
+        env:
+          FEE_FILE: /tmp/cricos-fee-canary.json
+        run: node scripts/validate-cricos-fee-snapshot.mjs
 
       - name: Upload fee canary artifact
         uses: actions/upload-artifact@v4
