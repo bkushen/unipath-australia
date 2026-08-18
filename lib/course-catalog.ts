@@ -11,6 +11,8 @@ type RawCourse = {
   cricos_field_1_broad: string | null;
   cricos_tuition_fee_total: number | string | null;
   cricos_duration_weeks: number | string | null;
+  cricos_fee_source_url: string | null;
+  cricos_fee_verified_at: string | null;
   university_course_code: string | null;
   source_url: string | null;
   verification_status: string;
@@ -20,6 +22,9 @@ type RawCourse = {
     fee_year: number;
     student_type: string;
     annual_fee: number | string | null;
+    total_fee: number | string | null;
+    source_url: string | null;
+    verified_at: string | null;
     verification_status: string;
   }>;
   course_campuses: Array<{
@@ -97,12 +102,14 @@ export async function loadVerifiedCourseCandidates(profileField = ""): Promise<C
       cricos_field_1_broad,
       cricos_tuition_fee_total,
       cricos_duration_weeks,
+      cricos_fee_source_url,
+      cricos_fee_verified_at,
       university_course_code,
       source_url,
       verification_status,
       universities(name),
       study_fields(name),
-      course_fees(fee_year, student_type, annual_fee, verification_status),
+      course_fees(fee_year, student_type, annual_fee, total_fee, source_url, verified_at, verification_status),
       course_campuses(
         campuses(
           name,
@@ -140,12 +147,21 @@ export async function loadVerifiedCourseCandidates(profileField = ""): Promise<C
       .sort((a, b) => b.fee_year - a.fee_year)[0];
 
     const verifiedAnnualFee = asNumber(latestInternationalFee?.annual_fee) ?? asNumber(row.annual_fee);
+    const verifiedTotalTuition = asNumber(latestInternationalFee?.total_fee);
     const cricosTotalTuition = asNumber(row.cricos_tuition_fee_total);
+    const totalTuition = verifiedTotalTuition ?? cricosTotalTuition;
     const cricosDurationWeeks = asNumber(row.cricos_duration_weeks);
     const cricosAnnualisedFee = cricosTotalTuition !== null && cricosDurationWeeks !== null && cricosDurationWeeks > 0
       ? Math.round(cricosTotalTuition / (cricosDurationWeeks / 52))
       : null;
     const annualFee = verifiedAnnualFee ?? cricosAnnualisedFee;
+    const hasUniversityFeeRecord = verifiedAnnualFee !== null || verifiedTotalTuition !== null;
+    const feeSourceUrl = hasUniversityFeeRecord
+      ? latestInternationalFee?.source_url ?? row.source_url
+      : row.cricos_fee_source_url ?? row.source_url;
+    const feeVerifiedAt = hasUniversityFeeRecord
+      ? latestInternationalFee?.verified_at ?? null
+      : row.cricos_fee_verified_at;
 
     const campus = row.course_campuses.find((item) => item.campuses)?.campuses ?? null;
     const livingValues = (campus?.living_costs ?? [])
@@ -187,6 +203,9 @@ export async function loadVerifiedCourseCandidates(profileField = ""): Promise<C
       regional: campus?.regional ?? false,
       regionalVerified: campus?.regional_verified ?? false,
       annualFee,
+      totalTuition,
+      feeSourceUrl,
+      feeVerifiedAt,
       durationMonths: row.duration_months ?? 0,
       estimatedMonthlyLiving,
       careerTags,
