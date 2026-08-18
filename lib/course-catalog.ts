@@ -128,7 +128,7 @@ export async function loadVerifiedCourseCandidates(profileField = ""): Promise<C
     .limit(broadField ? 500 : 300);
 
   if (broadField) {
-    query = query.or(`cricos_field_1_broad.eq.${broadField},cricos_field_1_broad.is.null`);
+    query = query.or(`cricos_field_1_broad.eq."${broadField}",cricos_field_1_broad.is.null`);
   }
 
   const { data, error } = await query;
