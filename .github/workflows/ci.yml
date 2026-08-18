@@ -22,11 +22,22 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Install dependencies
+      - name: Install dependencies and generate lockfile
         run: npm install
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev
 
       - name: Type check
         run: npm run typecheck
 
       - name: Production build
         run: npm run build
+
+      - name: Upload package lock
+        uses: actions/upload-artifact@v7
+        with:
+          name: unipath-package-lock
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 1
