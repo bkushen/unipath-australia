@@ -39,6 +39,15 @@ type RawCourse = {
     body_name: string;
     status: string | null;
   }>;
+  course_skilled_occupation_links: Array<{
+    confidence: string;
+    skilled_occupations: {
+      name: string;
+      skilled_occupation_programs: Array<{
+        migration_programs: { subclass: string } | null;
+      }>;
+    } | null;
+  }>;
 };
 
 const asNumber = (value: number | string | null | undefined) => {
@@ -74,7 +83,14 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
         )
       ),
       course_occupations(occupations(name)),
-      course_accreditations(body_name, status)
+      course_accreditations(body_name, status),
+      course_skilled_occupation_links(
+        confidence,
+        skilled_occupations(
+          name,
+          skilled_occupation_programs(migration_programs(subclass))
+        )
+      )
     `)
     .eq("verification_status", "VERIFIED");
 
@@ -99,6 +115,17 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
       .map((item) => item.occupations?.name)
       .filter((value): value is string => Boolean(value));
 
+    const migrationEvidenceLabels = row.course_skilled_occupation_links
+      .filter((item) => item.confidence === "HIGH" && item.skilled_occupations)
+      .map((item) => {
+        const occupation = item.skilled_occupations!;
+        const subclasses = occupation.skilled_occupation_programs
+          .map((entry) => entry.migration_programs?.subclass)
+          .filter((value): value is string => Boolean(value))
+          .filter((value, index, values) => values.indexOf(value) === index);
+        return `${occupation.name}${subclasses.length ? ` (${subclasses.join(", ")})` : ""}`;
+      });
+
     const field = row.study_fields?.name ?? "";
     const accreditation = row.course_accreditations
       .map((item) => item.status ? `${item.body_name} — ${item.status}` : item.body_name)
@@ -119,6 +146,8 @@ export async function loadVerifiedCourseCandidates(): Promise<CourseCandidate[]>
       careerTags,
       backgroundTags: [field, row.name, ...careerTags].filter(Boolean),
       migrationAlignment: "Unknown",
+      migrationEvidenceCount: migrationEvidenceLabels.length,
+      migrationEvidenceLabels,
       verificationStatus: row.verification_status === "VERIFIED" ? "VERIFIED" : "ESTIMATED",
       courseCode: row.university_course_code,
       cricosCode: row.cricos_code,
