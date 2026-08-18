@@ -1,0 +1,322 @@
+[
+  {
+    "cricos_code": "114669G",
+    "tuition_fee_total": 102528,
+    "non_tuition_fee_total": 5000,
+    "estimated_total_cost": 107528,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=114669g",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "114671B",
+    "tuition_fee_total": 69600,
+    "non_tuition_fee_total": 2500,
+    "estimated_total_cost": 72100,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=114671b",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "071003J",
+    "tuition_fee_total": 19048,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 19048,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=071003j",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "071241F",
+    "tuition_fee_total": 104904,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 104904,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=071241f",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "079874G",
+    "tuition_fee_total": 76192,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 76192,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=079874g",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "082139B",
+    "tuition_fee_total": 139872,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 139872,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=082139b",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "106765G",
+    "tuition_fee_total": 32232,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 32232,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=106765g",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "108634B",
+    "tuition_fee_total": 104904,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 104904,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=108634b",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "114234A",
+    "tuition_fee_total": 69456,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 69456,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=114234a",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "117399M",
+    "tuition_fee_total": 156000,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 156000,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=117399m",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "117562E",
+    "tuition_fee_total": 139872,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 139872,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=117562e",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "118206F",
+    "tuition_fee_total": 117000,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 117000,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=118206f",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "012006F",
+    "tuition_fee_total": 100800,
+    "non_tuition_fee_total": 1104,
+    "estimated_total_cost": 101904,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=012006f",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "107951H",
+    "tuition_fee_total": 17880,
+    "non_tuition_fee_total": 184,
+    "estimated_total_cost": 18064,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=107951h",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "107952G",
+    "tuition_fee_total": 35760,
+    "non_tuition_fee_total": 368,
+    "estimated_total_cost": 36128,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=107952g",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "107953F",
+    "tuition_fee_total": 71520,
+    "non_tuition_fee_total": 736,
+    "estimated_total_cost": 72256,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=107953f",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "0100566",
+    "tuition_fee_total": 118038,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 118038,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=0100566",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "0100636",
+    "tuition_fee_total": 118038,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 118038,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=0100636",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "041045C",
+    "tuition_fee_total": 237979,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 237979,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=041045c",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "066769E",
+    "tuition_fee_total": 237979,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 237979,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=066769e",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "077239G",
+    "tuition_fee_total": 83232,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 83232,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=077239g",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "077608J",
+    "tuition_fee_total": 112064,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 112064,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=077608j",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "078905C",
+    "tuition_fee_total": 157486,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 157486,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=078905c",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "079053A",
+    "tuition_fee_total": 114330,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 114330,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=079053a",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "079055K",
+    "tuition_fee_total": 114330,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 114330,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=079055k",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "079336A",
+    "tuition_fee_total": 176690,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 176690,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=079336a",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "084597D",
+    "tuition_fee_total": 54400,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 54400,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=084597d",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "085120M",
+    "tuition_fee_total": 173188,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 173188,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=085120m",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "085349A",
+    "tuition_fee_total": 114742,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 114742,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=085349a",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "085350G",
+    "tuition_fee_total": 237979,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 237979,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=085350g",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "085535K",
+    "tuition_fee_total": 237979,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 237979,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=085535k",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "085536J",
+    "tuition_fee_total": 247603,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 247603,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=085536j",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "085538G",
+    "tuition_fee_total": 118038,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 118038,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=085538g",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "091548K",
+    "tuition_fee_total": 22450,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 22450,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=091548k",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "103000K",
+    "tuition_fee_total": 118038,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 118038,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=103000k",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "110784C",
+    "tuition_fee_total": 92494,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 92494,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=110784c",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "115272J",
+    "tuition_fee_total": 244541,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 244541,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=115272j",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "116961J",
+    "tuition_fee_total": 90640,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 90640,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=116961j",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "119227D",
+    "tuition_fee_total": 157046,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 157046,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=119227d",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  },
+  {
+    "cricos_code": "119228C",
+    "tuition_fee_total": 157046,
+    "non_tuition_fee_total": 0,
+    "estimated_total_cost": 157046,
+    "source_url": "https://cricos.education.gov.au/course/coursedetails.aspx?coursecode=119228c",
+    "verified_at": "2026-08-18T02:49:33.059Z"
+  }
+]
