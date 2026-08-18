@@ -24,6 +24,9 @@ export type CourseCandidate = {
   regional: boolean;
   regionalVerified?: boolean;
   annualFee: number | null;
+  totalTuition?: number | null;
+  feeSourceUrl?: string | null;
+  feeVerifiedAt?: string | null;
   durationMonths: number;
   estimatedMonthlyLiving: number | null;
   careerTags: string[];
@@ -94,7 +97,12 @@ export function scoreCourse(profile: StudentAssessment, course: CourseCandidate)
   const totalBudget = Number(profile.totalBudget || 0);
   const livingBudget = Number(profile.livingBudget || 0);
   const years = Math.max(course.durationMonths, 0) / 12;
-  const estimatedTuition = course.annualFee !== null ? Math.round(course.annualFee * years) : null;
+  const exactTotalTuition = course.totalTuition ?? null;
+  const estimatedTuition = exactTotalTuition !== null
+    ? Math.round(exactTotalTuition)
+    : course.annualFee !== null
+      ? Math.round(course.annualFee * years)
+      : null;
   const estimatedLiving = course.estimatedMonthlyLiving !== null
     ? Math.round(course.estimatedMonthlyLiving * course.durationMonths)
     : null;
@@ -107,6 +115,9 @@ export function scoreCourse(profile: StudentAssessment, course: CourseCandidate)
     cautions.push("International tuition has not yet been verified for this course");
   } else {
     affordability = 75;
+    if (course.feeYear == null && exactTotalTuition !== null) {
+      cautions.push("The annual tuition figure is annualised from current whole-course CRICOS tuition, not a university academic-year fee");
+    }
     if (annualBudget > 0) {
       const feeRatio = course.annualFee / annualBudget;
       if (feeRatio <= 0.85) affordability = 100;
@@ -114,6 +125,10 @@ export function scoreCourse(profile: StudentAssessment, course: CourseCandidate)
       else if (feeRatio <= 1.15) affordability = 65;
       else affordability = 35;
     }
+  }
+
+  if (exactTotalTuition !== null) {
+    reasons.push("Official whole-course tuition is available for the total-budget comparison");
   }
 
   if (estimatedTotalCost !== null && totalBudget > 0) {
