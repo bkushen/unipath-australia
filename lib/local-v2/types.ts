@@ -19,6 +19,7 @@ export interface EvidenceRef {
 
 export interface StudentDecisionProfile {
   mode: AssessmentMode;
+  age?: number;
   highestQualification: string;
   qualificationField: string;
   academicScorePercent?: number;
