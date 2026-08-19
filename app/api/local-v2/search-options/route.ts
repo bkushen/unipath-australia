@@ -80,6 +80,7 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
     let options: SearchOption[] = [];
+    let source = "SUPABASE";
 
     if (type === "qualification") {
       const values = new Set<string>();
@@ -117,53 +118,85 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === "occupation") {
-      let occupationQuery = supabase
-        .from("occupations")
-        .select("id,name,code,assessing_authority")
+      let oscaQuery = supabase
+        .from("osca_occupations")
+        .select("id,code,name,classification_level,skill_level,source_url")
+        .eq("classification_level", "occupation")
         .order("name")
-        .limit(500);
-      let skilledQuery = supabase
-        .from("skilled_occupations")
-        .select("id,name,assessing_authority")
-        .order("name")
-        .limit(500);
-      if (q) {
-        occupationQuery = occupationQuery.ilike("name", `%${q}%`);
-        skilledQuery = skilledQuery.ilike("name", `%${q}%`);
-      }
-      const [{ data: occupations, error: occupationError }, { data: skilled, error: skilledError }] = await Promise.all([
-        occupationQuery,
-        skilledQuery,
-      ]);
-      if (occupationError) throw occupationError;
-      if (skilledError) throw skilledError;
+        .limit(q ? 120 : 100);
+      if (q) oscaQuery = oscaQuery.or(`name.ilike.%${q}%,code.ilike.%${q}%`);
+      const { data: oscaRows, error: oscaError } = await oscaQuery;
+      if (oscaError) throw oscaError;
 
-      const seen = new Set<string>();
-      for (const group of broadOccupationGroups.filter((item) => matches(item, q))) {
-        seen.add(group.toLowerCase());
-        options.push({ id: `occupation-group:${group}`, label: group, value: group, secondary: "Broad occupation group" });
-      }
-      for (const row of occupations ?? []) {
-        const key = row.name.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        options.push({
-          id: `occupation:${row.id}`,
-          label: row.name,
-          value: row.name,
-          secondary: [row.code, row.assessing_authority].filter(Boolean).join(" · ") || "Occupation",
-        });
-      }
-      for (const row of skilled ?? []) {
-        const key = row.name.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        options.push({
-          id: `skilled-occupation:${row.id}`,
-          label: row.name,
-          value: row.name,
-          secondary: ["Skilled occupation", row.assessing_authority].filter(Boolean).join(" · "),
-        });
+      if ((oscaRows ?? []).length > 0) {
+        source = "ABS_OSCA_2024";
+        const seen = new Set<string>();
+        if (!q) {
+          for (const group of broadOccupationGroups) {
+            seen.add(group.toLowerCase());
+            options.push({ id: `occupation-group:${group}`, label: group, value: group, secondary: "OSCA major occupation group" });
+          }
+        }
+        for (const row of oscaRows ?? []) {
+          const key = row.name.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          options.push({
+            id: `osca:${row.code}`,
+            label: row.name,
+            value: row.name,
+            secondary: [`OSCA ${row.code}`, row.skill_level ? `Skill level ${row.skill_level}` : null, "Australian Bureau of Statistics"].filter(Boolean).join(" · "),
+          });
+        }
+      } else {
+        let occupationQuery = supabase
+          .from("occupations")
+          .select("id,name,code,assessing_authority")
+          .order("name")
+          .limit(500);
+        let skilledQuery = supabase
+          .from("skilled_occupations")
+          .select("id,name,assessing_authority")
+          .order("name")
+          .limit(500);
+        if (q) {
+          occupationQuery = occupationQuery.ilike("name", `%${q}%`);
+          skilledQuery = skilledQuery.ilike("name", `%${q}%`);
+        }
+        const [{ data: occupations, error: occupationError }, { data: skilled, error: skilledError }] = await Promise.all([
+          occupationQuery,
+          skilledQuery,
+        ]);
+        if (occupationError) throw occupationError;
+        if (skilledError) throw skilledError;
+
+        const seen = new Set<string>();
+        for (const group of broadOccupationGroups.filter((item) => matches(item, q))) {
+          seen.add(group.toLowerCase());
+          options.push({ id: `occupation-group:${group}`, label: group, value: group, secondary: "Broad occupation group" });
+        }
+        for (const row of occupations ?? []) {
+          const key = row.name.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          options.push({
+            id: `occupation:${row.id}`,
+            label: row.name,
+            value: row.name,
+            secondary: [row.code, row.assessing_authority].filter(Boolean).join(" · ") || "Occupation",
+          });
+        }
+        for (const row of skilled ?? []) {
+          const key = row.name.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          options.push({
+            id: `skilled-occupation:${row.id}`,
+            label: row.name,
+            value: row.name,
+            secondary: ["Migration-linked occupation", row.assessing_authority].filter(Boolean).join(" · "),
+          });
+        }
       }
     }
 
@@ -224,7 +257,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ options, count: options.length, source: "SUPABASE", type, query: q });
+    return NextResponse.json({ options, count: options.length, source, type, query: q });
   } catch (error) {
     const detail = getErrorDetail(error);
     console.error("Quick Match option search failed", detail);
