@@ -26,6 +26,16 @@ function formatAud(value: number) {
   }).format(value);
 }
 
+function formatAmount(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return value === 0 ? "0" : "";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Math.round(value));
+}
+
+function parseAmount(value: string) {
+  const digitsOnly = value.replace(/[^0-9]/g, "");
+  return digitsOnly ? Number(digitsOnly) : 0;
+}
+
 export function CurrencyBudgetInput({
   label = "Annual tuition budget",
   audCents,
@@ -117,20 +127,25 @@ export function CurrencyBudgetInput({
       <div style={{ fontWeight: 650 }}>{label}</div>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 110px", gap: 8 }}>
         <input
-          type="number"
-          min={0}
-          step={1000}
-          value={amount}
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          value={formatAmount(amount)}
           onChange={(event) => {
             setSourceAmountReady(true);
-            setAmount(Number(event.target.value) || 0);
+            setAmount(parseAmount(event.target.value));
           }}
           style={inputStyle}
           aria-label={`${label} amount`}
+          placeholder="e.g. 5,000,000"
         />
         <select value={currency} onChange={(event) => changeCurrency(event.target.value)} style={inputStyle} aria-label="Budget currency">
           {currencyOptions.map((code) => <option key={code} value={code}>{code}</option>)}
         </select>
+      </div>
+
+      <div style={{ color: "#667085", fontSize: 12 }}>
+        Amount shown with thousands separators for easier reading.
       </div>
 
       <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 14 }}>
