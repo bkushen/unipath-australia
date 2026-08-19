@@ -1,82 +1,136 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { demoCampuses, demoCourses, demoUniversities } from "@/lib/local-v2/fixtures";
+import { useEffect, useMemo, useState } from "react";
 
-const money = (cents: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(cents / 100);
+type CatalogueCourse = {
+  id: string;
+  name: string;
+  slug: string | null;
+  qualificationLevel: string | null;
+  cricosCode: string | null;
+  durationMonths: number | null;
+  annualFee: number | null;
+  totalFee: number | null;
+  currency: string;
+  description: string | null;
+  deliveryMode: string | null;
+  verifiedAt: string | null;
+  verificationStatus: string | null;
+  officialCourseUrl: string | null;
+  sourceUrl: string | null;
+  university: {
+    id: string;
+    name: string;
+    slug: string | null;
+    website: string | null;
+    logoUrl: string | null;
+    cricosCode: string | null;
+  } | null;
+  campuses: Array<{
+    id: string;
+    name: string;
+    city: string | null;
+    state: string | null;
+    postcode: string | null;
+    regional: boolean;
+  }>;
+};
+
 const states = ["ALL", "VIC", "NSW", "QLD", "SA", "WA", "TAS", "ACT", "NT"];
+const money = (value: number | null, currency = "AUD") => value == null
+  ? "Fee not loaded"
+  : new Intl.NumberFormat("en-AU", { style: "currency", currency: currency || "AUD", maximumFractionDigits: 0 }).format(value);
 
 export default function CoursesPage() {
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [courses, setCourses] = useState<CatalogueCourse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [state, setState] = useState("ALL");
   const [regionalOnly, setRegionalOnly] = useState(false);
   const [qualification, setQualification] = useState("ALL");
-  const [scholarshipOnly, setScholarshipOnly] = useState(false);
-  const [maxAnnualFee, setMaxAnnualFee] = useState(50000);
-  const [sort, setSort] = useState("relevance");
+  const [maxAnnualFee, setMaxAnnualFee] = useState(80000);
+  const [sort, setSort] = useState("name");
 
-  const qualifications = useMemo(
-    () => ["ALL", ...Array.from(new Set(demoCourses.map((course) => course.qualificationLevel)))],
-    [],
-  );
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 280);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
-  const courses = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = demoCourses.filter((course) => {
-      const campus = demoCampuses.find((item) => item.id === course.campusId);
-      const university = demoUniversities.find((item) => item.id === course.universityId);
-      const matchesQuery = !q || [course.name, course.field, course.qualificationLevel, ...course.occupations, ...course.skillTags, university?.name ?? "", campus?.name ?? ""]
-        .some((value) => value.toLowerCase().includes(q));
-      const matchesState = state === "ALL" || campus?.state === state;
-      const matchesRegional = !regionalOnly || campus?.regional === true;
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/local-v2/courses?q=${encodeURIComponent(debouncedQuery)}&limit=100`, { signal: controller.signal });
+        const data = (await response.json()) as { courses?: CatalogueCourse[]; error?: string; detail?: string };
+        if (!response.ok) throw new Error(data.detail || data.error || "Unable to load courses.");
+        setCourses(data.courses ?? []);
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          setError((err as Error).message);
+          setCourses([]);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+    return () => controller.abort();
+  }, [debouncedQuery]);
+
+  const qualifications = useMemo(() => [
+    "ALL",
+    ...Array.from(new Set(courses.map((course) => course.qualificationLevel).filter((value): value is string => Boolean(value)))).sort(),
+  ], [courses]);
+
+  const filteredCourses = useMemo(() => {
+    const filtered = courses.filter((course) => {
+      const campuses = course.campuses ?? [];
+      const matchesState = state === "ALL" || campuses.some((campus) => campus.state === state);
+      const matchesRegional = !regionalOnly || campuses.some((campus) => campus.regional);
       const matchesQualification = qualification === "ALL" || course.qualificationLevel === qualification;
-      const matchesScholarship = !scholarshipOnly || (course.scholarshipPercent ?? 0) > 0;
-      const matchesFee = course.annualTuitionCents <= maxAnnualFee * 100;
-      return matchesQuery && matchesState && matchesRegional && matchesQualification && matchesScholarship && matchesFee;
+      const matchesFee = course.annualFee == null || course.annualFee <= maxAnnualFee;
+      return matchesState && matchesRegional && matchesQualification && matchesFee;
     });
 
     return [...filtered].sort((a, b) => {
-      if (sort === "fee-low") return a.annualTuitionCents - b.annualTuitionCents;
-      if (sort === "fee-high") return b.annualTuitionCents - a.annualTuitionCents;
-      if (sort === "jobs") return b.labourMarketScore - a.labourMarketScore;
-      if (sort === "scholarship") return (b.scholarshipPercent ?? 0) - (a.scholarshipPercent ?? 0);
-      return b.labourMarketScore - a.labourMarketScore;
+      if (sort === "fee-low") return (a.annualFee ?? Number.MAX_SAFE_INTEGER) - (b.annualFee ?? Number.MAX_SAFE_INTEGER);
+      if (sort === "fee-high") return (b.annualFee ?? -1) - (a.annualFee ?? -1);
+      if (sort === "university") return (a.university?.name ?? "").localeCompare(b.university?.name ?? "");
+      return a.name.localeCompare(b.name);
     });
-  }, [query, state, regionalOnly, qualification, scholarshipOnly, maxAnnualFee, sort]);
+  }, [courses, state, regionalOnly, qualification, maxAnnualFee, sort]);
 
   const clearFilters = () => {
     setQuery("");
     setState("ALL");
     setRegionalOnly(false);
     setQualification("ALL");
-    setScholarshipOnly(false);
-    setMaxAnnualFee(50000);
-    setSort("relevance");
+    setMaxAnnualFee(80000);
+    setSort("name");
   };
 
   return (
     <main style={pageStyle}>
       <section style={heroStyle}>
         <div style={heroInnerStyle}>
-          <div style={eyebrowStyle}>UNIPATH COURSE DISCOVERY</div>
+          <div style={eyebrowStyle}>UNIPATH AUSTRALIA · LIVE COURSE DATABASE</div>
           <h1 style={heroTitleStyle}>Search courses across Australia</h1>
-          <p style={heroTextStyle}>Explore courses by study area, career outcome, university, location and budget. This catalogue is using UniPath demo recommendation data while the real catalogue connection is built out.</p>
+          <p style={heroTextStyle}>Browse real UniPath course and university records, compare locations and fees, and continue to the university’s official website.</p>
 
           <div style={searchShellStyle}>
             <span style={{ fontSize: 20 }}>⌕</span>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search course, career, field or university"
-              style={heroSearchStyle}
-            />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search course, qualification or study area" style={heroSearchStyle} />
             {query && <button type="button" onClick={() => setQuery("")} style={clearSearchButtonStyle}>Clear</button>}
           </div>
 
           <div style={quickLinksStyle}>
             <button type="button" onClick={() => setQuery("software")} style={quickLinkStyle}>Software</button>
             <button type="button" onClick={() => setQuery("cyber")} style={quickLinkStyle}>Cyber Security</button>
-            <button type="button" onClick={() => setQuery("data")} style={quickLinkStyle}>Data Science</button>
+            <button type="button" onClick={() => setQuery("data science")} style={quickLinkStyle}>Data Science</button>
             <a href="/local-v2/quick-match" style={quickMatchLinkStyle}>Not sure? Try Quick Match →</a>
           </div>
         </div>
@@ -90,10 +144,7 @@ export default function CoursesPage() {
 
       <div style={contentGridStyle}>
         <aside style={filterPanelStyle}>
-          <div style={filterHeaderStyle}>
-            <strong>Filters</strong>
-            <button type="button" onClick={clearFilters} style={resetButtonStyle}>Clear all</button>
-          </div>
+          <div style={filterHeaderStyle}><strong>Filters</strong><button type="button" onClick={clearFilters} style={resetButtonStyle}>Clear all</button></div>
 
           <FilterGroup title="Qualification level">
             <select value={qualification} onChange={(event) => setQualification(event.target.value)} style={controlStyle}>
@@ -111,100 +162,95 @@ export default function CoursesPage() {
             <label style={checkRowStyle}><input type="checkbox" checked={regionalOnly} onChange={(event) => setRegionalOnly(event.target.checked)} /> Regional only</label>
           </FilterGroup>
 
-          <FilterGroup title="Scholarships">
-            <label style={checkRowStyle}><input type="checkbox" checked={scholarshipOnly} onChange={(event) => setScholarshipOnly(event.target.checked)} /> Scholarship available</label>
-          </FilterGroup>
-
           <FilterGroup title="Maximum annual tuition">
-            <input type="range" min="30000" max="50000" step="500" value={maxAnnualFee} onChange={(event) => setMaxAnnualFee(Number(event.target.value))} style={{ width: "100%" }} />
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 6, color: "#475467", fontSize: 13 }}><span>A$30k</span><strong>{money(maxAnnualFee * 100)}</strong></div>
+            <input type="range" min="20000" max="80000" step="1000" value={maxAnnualFee} onChange={(event) => setMaxAnnualFee(Number(event.target.value))} style={{ width: "100%" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 6, color: "#475467", fontSize: 13 }}><span>A$20k</span><strong>{money(maxAnnualFee)}</strong></div>
           </FilterGroup>
 
-          <div style={filterNoteStyle}>More filters will be connected as real university, scholarship, intake and delivery-mode data is added.</div>
+          <div style={filterNoteStyle}>Course links marked “Official course page” use a verified university-course URL when one is stored. Otherwise UniPath links to the university website until that course URL is verified.</div>
         </aside>
 
         <section>
           <div style={resultsHeaderStyle}>
             <div>
-              <div style={resultCountStyle}>{courses.length} course{courses.length === 1 ? "" : "s"}</div>
-              <div style={resultSubtextStyle}>Matching your current search and filters</div>
+              <div style={resultCountStyle}>{loading ? "Loading courses…" : `${filteredCourses.length} course${filteredCourses.length === 1 ? "" : "s"}`}</div>
+              <div style={resultSubtextStyle}>Supabase-backed UniPath catalogue</div>
             </div>
-            <label style={sortWrapStyle}>
-              <span>Sort by</span>
-              <select value={sort} onChange={(event) => setSort(event.target.value)} style={sortStyle}>
-                <option value="relevance">Best match</option>
-                <option value="fee-low">Lowest fee</option>
-                <option value="fee-high">Highest fee</option>
-                <option value="jobs">Job market</option>
-                <option value="scholarship">Scholarship</option>
-              </select>
-            </label>
+            <label style={sortWrapStyle}><span>Sort by</span><select value={sort} onChange={(event) => setSort(event.target.value)} style={sortStyle}><option value="name">Course name</option><option value="university">University</option><option value="fee-low">Lowest fee</option><option value="fee-high">Highest fee</option></select></label>
           </div>
 
-          {courses.length === 0 ? (
-            <div style={emptyStyle}>
-              <h2 style={{ marginTop: 0 }}>No courses match these filters</h2>
-              <p style={{ color: "#667085" }}>Try increasing your tuition limit, changing the state, or clearing a filter.</p>
-              <button type="button" onClick={clearFilters} style={primaryButtonStyle}>Clear filters</button>
-            </div>
+          {error && <div style={errorStyle}><strong>Couldn’t load the catalogue.</strong><div style={{ marginTop: 5 }}>{error}</div></div>}
+
+          {!loading && !error && filteredCourses.length === 0 ? (
+            <div style={emptyStyle}><h2 style={{ marginTop: 0 }}>No courses match these filters</h2><p style={{ color: "#667085" }}>Try another keyword, state or fee range.</p><button type="button" onClick={clearFilters} style={primaryButtonStyle}>Clear filters</button></div>
           ) : (
             <div style={{ display: "grid", gap: 16 }}>
-              {courses.map((course) => {
-                const campus = demoCampuses.find((item) => item.id === course.campusId);
-                const university = demoUniversities.find((item) => item.id === course.universityId);
-                const fullCourseCents = Math.round(course.annualTuitionCents * course.durationYears);
-                const semesterCents = Math.round(course.annualTuitionCents / 2);
-                const scholarshipPercent = course.scholarshipPercent ?? 0;
-                return (
-                  <article key={course.id} style={cardStyle}>
-                    <div style={cardTopStyle}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={universityStyle}>{university?.name}</div>
-                        <h2 style={courseTitleStyle}>{course.name}</h2>
-                        <div style={metaRowStyle}>
-                          <span>{course.qualificationLevel}</span>
-                          <span>•</span>
-                          <span>{campus?.name}</span>
-                          <span>•</span>
-                          <span>{campus?.state}</span>
-                        </div>
-                      </div>
-                      <div style={badgeWrapStyle}>
-                        {campus?.regional && <span style={regionalBadgeStyle}>Regional</span>}
-                        {scholarshipPercent > 0 && <span style={scholarshipBadgeStyle}>{scholarshipPercent}% scholarship demo</span>}
-                      </div>
-                    </div>
-
-                    <div style={statsGridStyle}>
-                      <Stat label="1 semester" value={money(semesterCents)} />
-                      <Stat label="Annual tuition" value={money(course.annualTuitionCents)} />
-                      <Stat label="Full course" value={money(fullCourseCents)} />
-                      <Stat label="Duration" value={`${course.durationYears} years`} />
-                    </div>
-
-                    <div style={detailGridStyle}>
-                      <div><div style={smallLabelStyle}>Study field</div><strong>{course.field}</strong></div>
-                      <div><div style={smallLabelStyle}>Job market score</div><strong>{course.labourMarketScore}/100 <span style={demoTextStyle}>demo</span></strong></div>
-                    </div>
-
-                    <div style={{ marginTop: 14 }}>
-                      <div style={smallLabelStyle}>Career outcomes</div>
-                      <div style={chipsStyle}>{course.occupations.map((occupation) => <span key={occupation} style={chipStyle}>{occupation}</span>)}</div>
-                    </div>
-
-                    <div style={cardActionsStyle}>
-                      <a href={`/local-v2/courses/${course.id}`} style={primaryLinkStyle}>View course details</a>
-                      <button type="button" style={secondaryActionStyle}>♡ Save</button>
-                      <a href={`/local-v2/compare?course=${course.id}`} style={secondaryLinkStyle}>+ Compare</a>
-                    </div>
-                  </article>
-                );
-              })}
+              {filteredCourses.map((course) => <CourseCard key={course.id} course={course} />)}
             </div>
           )}
         </section>
       </div>
     </main>
+  );
+}
+
+function CourseCard({ course }: { course: CatalogueCourse }) {
+  const university = course.university;
+  const firstCampus = course.campuses[0];
+  const duration = course.durationMonths ? `${course.durationMonths} months` : "Duration not loaded";
+  const officialUrl = course.officialCourseUrl || university?.website || null;
+  const externalLabel = course.officialCourseUrl ? "Official course page ↗" : "University website ↗";
+  const initials = (university?.name ?? "University").split(/\s+/).filter(Boolean).slice(0, 3).map((word) => word[0]).join("").toUpperCase();
+
+  return (
+    <article style={cardStyle}>
+      <div style={cardTopStyle}>
+        <div style={universityBrandStyle}>
+          <div style={logoShellStyle}>
+            {university?.logoUrl
+              ? <img src={university.logoUrl} alt={`${university.name} logo`} style={logoImageStyle} />
+              : <span style={logoFallbackStyle}>{initials}</span>}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={universityStyle}>{university?.name ?? "University not linked"}</div>
+            <h2 style={courseTitleStyle}>{course.name}</h2>
+            <div style={metaRowStyle}>
+              {course.qualificationLevel && <span>{course.qualificationLevel}</span>}
+              {course.cricosCode && <><span>•</span><span>CRICOS {course.cricosCode}</span></>}
+            </div>
+          </div>
+        </div>
+        <div style={badgeWrapStyle}>
+          {course.campuses.some((campus) => campus.regional) && <span style={regionalBadgeStyle}>Regional option</span>}
+          <span style={liveBadgeStyle}>Live DB</span>
+        </div>
+      </div>
+
+      <div style={statsGridStyle}>
+        <Stat label="Annual tuition" value={money(course.annualFee, course.currency)} />
+        <Stat label="Total tuition" value={money(course.totalFee, course.currency)} />
+        <Stat label="Duration" value={duration} />
+        <Stat label="Delivery" value={course.deliveryMode || "Not loaded"} />
+      </div>
+
+      <div style={detailGridStyle}>
+        <div><div style={smallLabelStyle}>Campus</div><strong>{firstCampus ? `${firstCampus.name}${firstCampus.city ? ` · ${firstCampus.city}` : ""}${firstCampus.state ? `, ${firstCampus.state}` : ""}` : "Campus not linked"}</strong></div>
+        <div><div style={smallLabelStyle}>University CRICOS</div><strong>{university?.cricosCode || "Not loaded"}</strong></div>
+      </div>
+
+      {course.campuses.length > 1 && <div style={{ marginTop: 13 }}><div style={smallLabelStyle}>Other campus options</div><div style={chipsStyle}>{course.campuses.slice(1, 5).map((campus) => <span key={campus.id} style={chipStyle}>{campus.city || campus.name}{campus.state ? `, ${campus.state}` : ""}</span>)}</div></div>}
+
+      <div style={cardActionsStyle}>
+        {officialUrl
+          ? <a href={officialUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle}>{externalLabel}</a>
+          : <span style={disabledLinkStyle}>Official link not loaded</span>}
+        {university?.website && course.officialCourseUrl && <a href={university.website} target="_blank" rel="noreferrer" style={secondaryLinkStyle}>University website ↗</a>}
+        <button type="button" style={secondaryActionStyle}>♡ Save</button>
+        <a href={`/local-v2/compare?course=${course.id}`} style={secondaryLinkStyle}>+ Compare</a>
+      </div>
+
+      {!university?.logoUrl && <div style={logoNoteStyle}>University logo slot is ready; verified official logo asset still needs to be added for this university.</div>}
+    </article>
   );
 }
 
@@ -239,30 +285,36 @@ const filterGroupStyle = { padding: "16px 0", borderBottom: "1px solid #f0f2f5" 
 const filterTitleStyle = { fontWeight: 800, marginBottom: 9, fontSize: 14 } as const;
 const controlStyle = { width: "100%", padding: "10px 10px", borderRadius: 9, border: "1px solid #d0d5dd", background: "#fff" } as const;
 const checkRowStyle = { display: "flex", gap: 8, alignItems: "center", color: "#344054", fontSize: 14 } as const;
-const filterNoteStyle = { marginTop: 16, padding: 12, background: "#f8fafc", borderRadius: 10, color: "#667085", fontSize: 12, lineHeight: 1.5 } as const;
-const resultsHeaderStyle = { display: "flex", justifyContent: "space-between", gap: 18, alignItems: "end", marginBottom: 16, flexWrap: "wrap" } as const;
-const resultCountStyle = { fontSize: 23, fontWeight: 850 } as const;
+const filterNoteStyle = { marginTop: 16, padding: 12, background: "#f8fafc", borderRadius: 10, color: "#667085", fontSize: 12, lineHeight: 1.45 } as const;
+const resultsHeaderStyle = { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", marginBottom: 14, flexWrap: "wrap" } as const;
+const resultCountStyle = { fontSize: 21, fontWeight: 850 } as const;
 const resultSubtextStyle = { color: "#667085", fontSize: 13, marginTop: 2 } as const;
-const sortWrapStyle = { display: "flex", gap: 9, alignItems: "center", color: "#475467", fontSize: 13, fontWeight: 700 } as const;
-const sortStyle = { padding: "9px 10px", border: "1px solid #d0d5dd", borderRadius: 9, background: "#fff" } as const;
-const cardStyle = { background: "#fff", border: "1px solid #e4e7ec", borderRadius: 18, padding: 22, boxShadow: "0 4px 16px rgba(16,24,40,.04)" } as const;
-const cardTopStyle = { display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start", flexWrap: "wrap" } as const;
-const universityStyle = { color: "#0057b8", fontSize: 13, fontWeight: 800 } as const;
-const courseTitleStyle = { margin: "6px 0 7px", fontSize: 23, lineHeight: 1.2 } as const;
-const metaRowStyle = { display: "flex", flexWrap: "wrap", gap: 7, color: "#667085", fontSize: 13 } as const;
-const badgeWrapStyle = { display: "flex", flexWrap: "wrap", gap: 7, justifyContent: "flex-end" } as const;
-const regionalBadgeStyle = { background: "#ecfdf3", color: "#027a48", border: "1px solid #abefc6", borderRadius: 999, padding: "5px 9px", fontWeight: 800, fontSize: 12 } as const;
-const scholarshipBadgeStyle = { background: "#fff6ed", color: "#b54708", border: "1px solid #fedf89", borderRadius: 999, padding: "5px 9px", fontWeight: 800, fontSize: 12 } as const;
+const sortWrapStyle = { display: "flex", gap: 8, alignItems: "center", color: "#475467", fontSize: 13, fontWeight: 700 } as const;
+const sortStyle = { border: "1px solid #d0d5dd", borderRadius: 9, padding: "9px 10px", background: "#fff" } as const;
+const cardStyle = { border: "1px solid #e1e6ed", borderRadius: 18, padding: 20, background: "#fff", boxShadow: "0 3px 12px rgba(16,24,40,.04)" } as const;
+const cardTopStyle = { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" } as const;
+const universityBrandStyle = { display: "flex", gap: 14, alignItems: "flex-start", minWidth: 0, flex: "1 1 520px" } as const;
+const logoShellStyle = { width: 72, height: 72, border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto" } as const;
+const logoImageStyle = { width: "100%", height: "100%", objectFit: "contain", padding: 7 } as const;
+const logoFallbackStyle = { fontWeight: 900, color: "#0057b8", fontSize: 18, letterSpacing: 0.5 } as const;
+const universityStyle = { color: "#0057b8", fontWeight: 850, fontSize: 14, marginBottom: 5 } as const;
+const courseTitleStyle = { margin: 0, fontSize: 24, lineHeight: 1.25 } as const;
+const metaRowStyle = { display: "flex", flexWrap: "wrap", gap: 7, color: "#667085", fontSize: 13, marginTop: 8 } as const;
+const badgeWrapStyle = { display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" } as const;
+const regionalBadgeStyle = { padding: "6px 9px", borderRadius: 999, background: "#ecfdf3", color: "#027a48", border: "1px solid #abefc6", fontWeight: 800, fontSize: 12 } as const;
+const liveBadgeStyle = { padding: "6px 9px", borderRadius: 999, background: "#eaf3ff", color: "#0057b8", border: "1px solid #b9d4f5", fontWeight: 800, fontSize: 12 } as const;
 const statsGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))", gap: 10, marginTop: 18 } as const;
-const statStyle = { padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #eef2f6" } as const;
-const smallLabelStyle = { color: "#667085", fontSize: 12, marginBottom: 4, fontWeight: 650 } as const;
-const detailGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 14, marginTop: 16 } as const;
-const demoTextStyle = { color: "#98a2b3", fontSize: 11, fontWeight: 650 } as const;
-const chipsStyle = { display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 } as const;
-const chipStyle = { background: "#f2f4f7", borderRadius: 999, padding: "6px 9px", fontSize: 12, color: "#344054", fontWeight: 650 } as const;
-const cardActionsStyle = { display: "flex", flexWrap: "wrap", gap: 9, marginTop: 20, paddingTop: 16, borderTop: "1px solid #eaecf0" } as const;
-const primaryLinkStyle = { background: "#0057b8", color: "#fff", textDecoration: "none", padding: "10px 14px", borderRadius: 9, fontWeight: 800 } as const;
-const secondaryActionStyle = { border: "1px solid #d0d5dd", background: "#fff", color: "#344054", borderRadius: 9, padding: "10px 14px", fontWeight: 750, cursor: "pointer" } as const;
-const secondaryLinkStyle = { border: "1px solid #d0d5dd", background: "#fff", color: "#344054", borderRadius: 9, padding: "10px 14px", fontWeight: 750, textDecoration: "none" } as const;
-const emptyStyle = { background: "#fff", border: "1px solid #e4e7ec", borderRadius: 16, padding: 28, textAlign: "center" } as const;
+const statStyle = { border: "1px solid #eaecf0", borderRadius: 11, background: "#f9fafb", padding: 12 } as const;
+const smallLabelStyle = { color: "#667085", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: .35, marginBottom: 4 } as const;
+const detailGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 14, marginTop: 16, paddingTop: 15, borderTop: "1px solid #eef1f4" } as const;
+const chipsStyle = { display: "flex", gap: 7, flexWrap: "wrap", marginTop: 7 } as const;
+const chipStyle = { padding: "5px 8px", borderRadius: 999, background: "#f2f4f7", color: "#344054", fontSize: 12, fontWeight: 700 } as const;
+const cardActionsStyle = { display: "flex", gap: 9, flexWrap: "wrap", marginTop: 18, paddingTop: 16, borderTop: "1px solid #eef1f4" } as const;
+const primaryLinkStyle = { padding: "10px 13px", background: "#0057b8", color: "#fff", borderRadius: 9, textDecoration: "none", fontWeight: 800 } as const;
+const secondaryLinkStyle = { padding: "10px 13px", border: "1px solid #d0d5dd", color: "#344054", borderRadius: 9, textDecoration: "none", fontWeight: 750, background: "#fff" } as const;
+const secondaryActionStyle = { padding: "10px 13px", border: "1px solid #d0d5dd", color: "#344054", borderRadius: 9, fontWeight: 750, background: "#fff", cursor: "pointer" } as const;
+const disabledLinkStyle = { padding: "10px 13px", borderRadius: 9, background: "#f2f4f7", color: "#98a2b3", fontWeight: 750 } as const;
+const logoNoteStyle = { marginTop: 12, color: "#667085", fontSize: 11 } as const;
+const emptyStyle = { border: "1px solid #e4e7ec", borderRadius: 16, background: "#fff", padding: 28, textAlign: "center" } as const;
+const errorStyle = { marginBottom: 14, border: "1px solid #fecdca", borderRadius: 12, background: "#fff6f5", color: "#b42318", padding: 14 } as const;
 const primaryButtonStyle = { border: 0, borderRadius: 9, background: "#0057b8", color: "#fff", padding: "10px 14px", fontWeight: 800, cursor: "pointer" } as const;
