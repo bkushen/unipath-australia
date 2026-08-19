@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { CurrencyBudgetInput } from "@/components/local-v2/CurrencyBudgetInput";
 import { clearLocalV2Profile, loadLocalV2Profile, saveLocalV2Profile } from "@/lib/local-v2/profile-storage";
 import { rankCourses } from "@/lib/local-v2/recommendation-engine";
 import type { AustralianState, MigrationImportance, StudentDecisionProfile } from "@/lib/local-v2/types";
 
 const states: AustralianState[] = ["VIC", "NSW", "QLD", "SA", "WA", "TAS", "ACT", "NT"];
-
-const money = (cents: number) =>
-  new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(cents / 100);
+const money = (cents: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(cents / 100);
 
 const initialProfile: StudentDecisionProfile = {
   mode: "quick",
@@ -28,7 +27,6 @@ const initialProfile: StudentDecisionProfile = {
 };
 
 type Stage = "quick-input" | "quick-result" | "detailed-input" | "detailed-result" | "migration-result";
-
 type ResultSource = "quick" | "detailed";
 
 export default function QuickMatchPage() {
@@ -49,20 +47,11 @@ export default function QuickMatchPage() {
   }, []);
 
   useEffect(() => {
-    if (!storageReady) return;
-    saveLocalV2Profile(profile);
+    if (storageReady) saveLocalV2Profile(profile);
   }, [profile, storageReady]);
 
-  const standardResults = useMemo(
-    () => rankCourses({ ...profile, migrationImportance: "none" }),
-    [profile],
-  );
-
-  const migrationResults = useMemo(
-    () => rankCourses({ ...profile, migrationImportance: migrationChoice }),
-    [profile, migrationChoice],
-  );
-
+  const standardResults = useMemo(() => rankCourses({ ...profile, migrationImportance: "none" }), [profile]);
+  const migrationResults = useMemo(() => rankCourses({ ...profile, migrationImportance: migrationChoice }), [profile, migrationChoice]);
   const topStandard = standardResults.slice(0, 3);
   const topMigration = migrationResults.slice(0, 3);
 
@@ -74,20 +63,6 @@ export default function QuickMatchPage() {
         : [...current.preferredStates, state],
     }));
   };
-
-  const showQuickResult = () => {
-    setProfile((current) => ({ ...current, mode: "quick", migrationImportance: "none" }));
-    setResultSource("quick");
-    setStage("quick-result");
-  };
-
-  const showDetailedResult = () => {
-    setProfile((current) => ({ ...current, mode: "detailed", migrationImportance: "none" }));
-    setResultSource("detailed");
-    setStage("detailed-result");
-  };
-
-  const runMigrationAware = () => setStage("migration-result");
 
   const resetSavedProfile = () => {
     clearLocalV2Profile();
@@ -132,16 +107,14 @@ export default function QuickMatchPage() {
   return (
     <main style={{ maxWidth: 980, margin: "0 auto", padding: "32px 18px 70px" }}>
       <div style={{ marginBottom: 22 }}>
-        <span style={demoBadgeStyle}>LOCAL DEMO DATA</span>
+        <span style={demoBadgeStyle}>LOCAL DEMO COURSE DATA · LIVE FX</span>
         <h1 style={{ marginBottom: 8 }}>UniPath Quick → Detailed → PR Pathway Flow</h1>
         <p style={{ color: "#586174", maxWidth: 800 }}>
-          This is the first interactive V2 flow. Quick Match gives a fast result, then asks whether the user wants a detailed assessment. After every result, UniPath separately asks whether PR/migration pathways should be considered.
+          Course and migration values are still local demo data. Budget inputs can now be entered in your own currency and are converted to AUD using the latest available daily exchange rate.
         </p>
         <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "#eef6ff", border: "1px solid #cfe3ff" }}>
           <strong>Profile persistence:</strong> {restoredProfile ? "Your previous local profile was restored automatically." : "Your answers are saved automatically in this browser."}
-          <button type="button" onClick={resetSavedProfile} style={{ marginLeft: 12, border: "1px solid #b8c7db", background: "#fff", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>
-            Clear saved profile
-          </button>
+          <button type="button" onClick={resetSavedProfile} style={{ marginLeft: 12, border: "1px solid #b8c7db", background: "#fff", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>Clear saved profile</button>
         </div>
       </div>
 
@@ -165,9 +138,11 @@ export default function QuickMatchPage() {
                 <option>Software Engineer</option><option>Software Developer</option><option>Data Scientist</option><option>Cyber Security Analyst</option><option>ICT Business Analyst</option>
               </select>
             </label>
-            <label style={labelStyle}>Annual tuition budget (AUD)
-              <input type="number" min={10000} step={1000} value={profile.annualTuitionBudgetCents / 100} onChange={(e) => setProfile({ ...profile, annualTuitionBudgetCents: Number(e.target.value) * 100 })} style={inputStyle} />
-            </label>
+            <CurrencyBudgetInput
+              label="Annual tuition budget"
+              audCents={profile.annualTuitionBudgetCents}
+              onAudCentsChange={(annualTuitionBudgetCents) => setProfile((current) => ({ ...current, annualTuitionBudgetCents }))}
+            />
           </div>
 
           <fieldset style={fieldsetStyle}>
@@ -186,7 +161,7 @@ export default function QuickMatchPage() {
           </label>
 
           <div style={{ marginTop: 22 }}>
-            <button type="button" onClick={showQuickResult} style={primaryButtonStyle}>Get Quick Result</button>
+            <button type="button" onClick={() => { setProfile((current) => ({ ...current, mode: "quick", migrationImportance: "none" })); setResultSource("quick"); setStage("quick-result"); }} style={primaryButtonStyle}>Get Quick Result</button>
           </div>
         </section>
       )}
@@ -198,7 +173,6 @@ export default function QuickMatchPage() {
             <h2>Your quick matches</h2>
             <ResultCards />
           </section>
-
           <section style={{ ...sectionStyle, marginTop: 16 }}>
             <h2>Do you want a more detailed result?</h2>
             <p>We will keep your Quick Match answers and ask about experience, skills, total funds, dependants and transport preferences.</p>
@@ -207,8 +181,7 @@ export default function QuickMatchPage() {
               <button type="button" onClick={() => setResultSource("quick")} style={secondaryButtonStyle}>No, keep Quick Result</button>
             </div>
           </section>
-
-          <MigrationPrompt onContinue={runMigrationAware} migrationChoice={migrationChoice} setMigrationChoice={setMigrationChoice} source="Quick Result" />
+          <MigrationPrompt onContinue={() => setStage("migration-result")} migrationChoice={migrationChoice} setMigrationChoice={setMigrationChoice} source="Quick Result" />
         </>
       )}
 
@@ -218,9 +191,11 @@ export default function QuickMatchPage() {
           <h2>Improve your recommendation</h2>
           <p>Your Quick Match answers are retained. Add more information below.</p>
           <div style={formGridStyle}>
-            <label style={labelStyle}>Total funds available (AUD)
-              <input type="number" min={10000} step={1000} value={profile.totalFundsCents / 100} onChange={(e) => setProfile({ ...profile, totalFundsCents: Number(e.target.value) * 100 })} style={inputStyle} />
-            </label>
+            <CurrencyBudgetInput
+              label="Total funds available"
+              audCents={profile.totalFundsCents}
+              onAudCentsChange={(totalFundsCents) => setProfile((current) => ({ ...current, totalFundsCents }))}
+            />
             <label style={labelStyle}>Years of relevant experience
               <input type="number" min={0} max={40} step={0.5} value={profile.yearsExperience ?? 0} onChange={(e) => setProfile({ ...profile, yearsExperience: Number(e.target.value) })} style={inputStyle} />
             </label>
@@ -237,7 +212,7 @@ export default function QuickMatchPage() {
             </label>
           </div>
           <div style={buttonRowStyle}>
-            <button type="button" onClick={showDetailedResult} style={primaryButtonStyle}>Get Detailed Result</button>
+            <button type="button" onClick={() => { setProfile((current) => ({ ...current, mode: "detailed", migrationImportance: "none" })); setResultSource("detailed"); setStage("detailed-result"); }} style={primaryButtonStyle}>Get Detailed Result</button>
             <button type="button" onClick={() => setStage("quick-result")} style={secondaryButtonStyle}>Back</button>
           </div>
         </section>
@@ -251,48 +226,31 @@ export default function QuickMatchPage() {
             <p>These results reuse the same explainable engine with the additional profile information you supplied.</p>
             <ResultCards />
           </section>
-          <MigrationPrompt onContinue={runMigrationAware} migrationChoice={migrationChoice} setMigrationChoice={setMigrationChoice} source="Detailed Result" />
+          <MigrationPrompt onContinue={() => setStage("migration-result")} migrationChoice={migrationChoice} setMigrationChoice={setMigrationChoice} source="Detailed Result" />
         </>
       )}
 
       {stage === "migration-result" && (
-        <>
-          <section style={sectionStyle}>
-            <div style={stepStyle}>FINAL STEP · MIGRATION-AWARE COMPARISON</div>
-            <h2>Original vs migration-aware result</h2>
-            <p>
-              UniPath keeps the original {resultSource === "quick" ? "Quick" : "Detailed"} Result and creates a separate migration-aware ranking. It never silently replaces the original recommendation.
-            </p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
-              <div>
-                <h3>Original recommendation</h3>
-                <ResultCards />
-              </div>
-              <div>
-                <h3>Migration-aware recommendation</h3>
-                <ResultCards migration />
-              </div>
-            </div>
-            <div style={warningStyle}>
-              Migration values on this local page are DEMO scoring fixtures only. They are not current Australian migration rules, legal advice or a PR guarantee.
-            </div>
-            <div style={buttonRowStyle}>
-              <button type="button" onClick={() => setStage(resultSource === "quick" ? "quick-result" : "detailed-result")} style={secondaryButtonStyle}>Back to result</button>
-              <button type="button" onClick={resetSavedProfile} style={primaryButtonStyle}>Start again</button>
-            </div>
-          </section>
-        </>
+        <section style={sectionStyle}>
+          <div style={stepStyle}>FINAL STEP · MIGRATION-AWARE COMPARISON</div>
+          <h2>Original vs migration-aware result</h2>
+          <p>UniPath keeps the original {resultSource === "quick" ? "Quick" : "Detailed"} Result and creates a separate migration-aware ranking.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
+            <div><h3>Original recommendation</h3><ResultCards /></div>
+            <div><h3>Migration-aware recommendation</h3><ResultCards migration /></div>
+          </div>
+          <div style={warningStyle}>Migration values on this local page are DEMO scoring fixtures only. They are not current Australian migration rules, legal advice or a PR guarantee.</div>
+          <div style={buttonRowStyle}>
+            <button type="button" onClick={() => setStage(resultSource === "quick" ? "quick-result" : "detailed-result")} style={secondaryButtonStyle}>Back to result</button>
+            <button type="button" onClick={resetSavedProfile} style={primaryButtonStyle}>Start again</button>
+          </div>
+        </section>
       )}
     </main>
   );
 }
 
-function MigrationPrompt({ onContinue, migrationChoice, setMigrationChoice, source }: {
-  onContinue: () => void;
-  migrationChoice: MigrationImportance;
-  setMigrationChoice: (value: MigrationImportance) => void;
-  source: string;
-}) {
+function MigrationPrompt({ onContinue, migrationChoice, setMigrationChoice, source }: { onContinue: () => void; migrationChoice: MigrationImportance; setMigrationChoice: (value: MigrationImportance) => void; source: string; }) {
   return (
     <section style={{ ...sectionStyle, marginTop: 16 }}>
       <div style={stepStyle}>OPTIONAL · PR / MIGRATION PATHWAY</div>
@@ -301,17 +259,11 @@ function MigrationPrompt({ onContinue, migrationChoice, setMigrationChoice, sour
       <div style={formGridStyle}>
         <label style={labelStyle}>How important is this to you?
           <select value={migrationChoice} onChange={(e) => setMigrationChoice(e.target.value as MigrationImportance)} style={inputStyle}>
-            <option value="consider">Consider it, but keep career/course quality important</option>
-            <option value="high">Very important</option>
-            <option value="none">Not important</option>
+            <option value="consider">Consider it, but keep career/course quality important</option><option value="high">Very important</option><option value="none">Not important</option>
           </select>
         </label>
       </div>
-      {migrationChoice === "none" ? (
-        <p style={{ color: "#586174" }}>No migration-aware re-ranking will be applied.</p>
-      ) : (
-        <button type="button" onClick={onContinue} style={primaryButtonStyle}>Show Migration-Aware Result</button>
-      )}
+      {migrationChoice === "none" ? <p style={{ color: "#586174" }}>No migration-aware re-ranking will be applied.</p> : <button type="button" onClick={onContinue} style={primaryButtonStyle}>Show Migration-Aware Result</button>}
     </section>
   );
 }
