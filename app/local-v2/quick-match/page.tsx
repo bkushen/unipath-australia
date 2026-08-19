@@ -14,16 +14,16 @@ const initialProfile: StudentDecisionProfile = {
   mode: "quick",
   highestQualification: "Bachelor",
   qualificationField: "Information Technology",
-  academicScorePercent: 65,
-  englishTestType: "ielts",
-  englishScore: 6.5,
+  academicScorePercent: undefined,
+  englishTestType: "none",
+  englishScore: undefined,
   desiredOccupation: "Software Engineer",
   preferredStudy: "",
   preferredLocation: "",
   annualTuitionBudgetCents: 4000000,
   semesterTuitionBudgetCents: 2000000,
   fullCourseBudgetCents: 8000000,
-  scholarshipImportance: "prefer",
+  scholarshipImportance: "none",
   totalFundsCents: 12000000,
   preferredStates: ["VIC"],
   regionalAccepted: true,
@@ -99,7 +99,7 @@ export default function QuickMatchPage() {
           regionalAccepted: profile.regionalAccepted,
           semesterBudget: (profile.semesterTuitionBudgetCents ?? profile.annualTuitionBudgetCents / 2) / 100,
           fullBudget: (profile.fullCourseBudgetCents ?? profile.annualTuitionBudgetCents * 2) / 100,
-          scholarshipImportance: profile.scholarshipImportance ?? "prefer",
+          scholarshipImportance: profile.scholarshipImportance ?? "none",
           migrationImportance,
         },
         candidates: base,
@@ -127,7 +127,7 @@ export default function QuickMatchPage() {
         states: profile.preferredStates.join(","),
         regionalAccepted: String(profile.regionalAccepted),
         migrationImportance,
-        scholarshipImportance: profile.scholarshipImportance ?? "prefer",
+        scholarshipImportance: profile.scholarshipImportance ?? "none",
         semesterBudget: String((profile.semesterTuitionBudgetCents ?? profile.annualTuitionBudgetCents / 2) / 100),
         fullBudget: String((profile.fullCourseBudgetCents ?? profile.annualTuitionBudgetCents * 2) / 100),
       });
@@ -153,31 +153,49 @@ export default function QuickMatchPage() {
     <header style={{ marginBottom: 24 }}>
       <div style={topRowStyle}><span style={badgeStyle}>Quick Match · smart scoring + live database</span><button type="button" onClick={reset} style={ghostButtonStyle}>Clear saved answers</button></div>
       <h1 style={{ margin: "16px 0 8px", fontSize: 42, color: "#fff" }}>What should I study in Australia?</h1>
-      <p style={heroCopyStyle}>UniPath finds live course matches and calculates a transparent fit score from your education, English result, career goal, budget, location and source-backed entry requirements. Paid AI is optional.</p>
+      <p style={heroCopyStyle}>Start with only your education, career goal, budget and location. Add extra details only if you want a more precise match.</p>
     </header>
 
     {stage === "input" && <section style={shellStyle}>
       <div style={progressTextStyle}>Step {step} of 4</div><div style={progressTrackStyle}><div style={{ ...progressFillStyle, width: `${step * 25}%` }} /></div>
 
-      {step === 1 && <div style={panelStyle}><h2>Your education & English</h2><p style={mutedStyle}>These details let UniPath check course fit and any verified entry requirements.</p><div style={gridStyle}>
-        <SearchableDatabaseSelect label="Highest qualification" type="qualification" value={profile.highestQualification} placeholder="Search qualification" onChange={(highestQualification) => setProfile((c) => ({ ...c, highestQualification }))} />
-        <SearchableDatabaseSelect label="Previous study field" type="study_field" value={profile.qualificationField} placeholder="e.g. Information Technology" onChange={(qualificationField) => setProfile((c) => ({ ...c, qualificationField }))} />
-        <label style={labelStyle}>Academic average / percentage<input type="number" min={0} max={100} step={0.1} value={profile.academicScorePercent ?? ""} onChange={(e) => setProfile((c) => ({ ...c, academicScorePercent: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} placeholder="e.g. 65" /></label>
-        <label style={labelStyle}>English test<select value={profile.englishTestType ?? "none"} onChange={(e) => setProfile((c) => ({ ...c, englishTestType: e.target.value as EnglishTestType, englishScore: e.target.value === "none" ? undefined : c.englishScore }))} style={inputStyle}><option value="none">Not taken / not entered</option><option value="ielts">IELTS</option><option value="pte">PTE Academic</option></select></label>
-        {(profile.englishTestType ?? "none") !== "none" && <label style={labelStyle}>{profile.englishTestType === "pte" ? "PTE overall score" : "IELTS overall score"}<input type="number" min={0} max={profile.englishTestType === "pte" ? 90 : 9} step={profile.englishTestType === "pte" ? 1 : 0.5} value={profile.englishScore ?? ""} onChange={(e) => setProfile((c) => ({ ...c, englishScore: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} /></label>}
-      </div></div>}
+      {step === 1 && <div style={panelStyle}>
+        <h2>Your background & career goal</h2>
+        <p style={mutedStyle}>These are the three core details UniPath needs to start matching courses.</p>
+        <div style={gridStyle}>
+          <SearchableDatabaseSelect label="Highest qualification" type="qualification" value={profile.highestQualification} placeholder="Search qualification" onChange={(highestQualification) => setProfile((c) => ({ ...c, highestQualification }))} />
+          <SearchableDatabaseSelect label="Previous study field" type="study_field" value={profile.qualificationField} placeholder="e.g. Information Technology" onChange={(qualificationField) => setProfile((c) => ({ ...c, qualificationField }))} />
+          <SearchableDatabaseSelect label="Career goal" type="occupation" value={profile.desiredOccupation} placeholder="e.g. Software Engineer" onChange={(desiredOccupation) => setProfile((c) => ({ ...c, desiredOccupation }))} />
+        </div>
+      </div>}
 
-      {step === 2 && <div style={panelStyle}><h2>Your future</h2><div style={gridStyle}>
-        <SearchableDatabaseSelect label="Career goal" type="occupation" value={profile.desiredOccupation} placeholder="e.g. Software Engineer" onChange={(desiredOccupation) => setProfile((c) => ({ ...c, desiredOccupation }))} />
-        <SearchableDatabaseSelect label="Preferred course or study area" type="course" value={profile.preferredStudy ?? ""} placeholder="e.g. Cyber Security" onChange={(preferredStudy) => setProfile((c) => ({ ...c, preferredStudy }))} />
-      </div></div>}
+      {step === 2 && <div style={panelStyle}>
+        <h2>Your budget</h2>
+        <p style={mutedStyle}>Tell UniPath what tuition range is realistic for you.</p>
+        <div style={gridStyle}>
+          <CurrencyBudgetInput label="Budget for one semester" audCents={profile.semesterTuitionBudgetCents ?? profile.annualTuitionBudgetCents / 2} onAudCentsChange={(semesterTuitionBudgetCents) => setProfile((c) => ({ ...c, semesterTuitionBudgetCents, annualTuitionBudgetCents: semesterTuitionBudgetCents * 2 }))} />
+          <CurrencyBudgetInput label="Maximum full course budget" audCents={profile.fullCourseBudgetCents ?? profile.annualTuitionBudgetCents * 2} onAudCentsChange={(fullCourseBudgetCents) => setProfile((c) => ({ ...c, fullCourseBudgetCents }))} />
+        </div>
+      </div>}
 
-      {step === 3 && <div style={panelStyle}><h2>Your budget</h2><div style={gridStyle}>
-        <CurrencyBudgetInput label="Budget for one semester" audCents={profile.semesterTuitionBudgetCents ?? profile.annualTuitionBudgetCents / 2} onAudCentsChange={(semesterTuitionBudgetCents) => setProfile((c) => ({ ...c, semesterTuitionBudgetCents, annualTuitionBudgetCents: semesterTuitionBudgetCents * 2 }))} />
-        <CurrencyBudgetInput label="Maximum full course budget" audCents={profile.fullCourseBudgetCents ?? profile.annualTuitionBudgetCents * 2} onAudCentsChange={(fullCourseBudgetCents) => setProfile((c) => ({ ...c, fullCourseBudgetCents }))} />
-      </div><div style={{ marginTop: 20 }}><strong>Scholarship importance</strong><div style={pillRowStyle}>{([['high','Very important'],['prefer','Prefer if available'],['none','Not important']] as [ScholarshipImportance,string][]).map(([value,label]) => <button key={value} type="button" onClick={() => setProfile((c) => ({ ...c, scholarshipImportance: value }))} style={{ ...pillStyle, ...((profile.scholarshipImportance ?? "prefer") === value ? selectedPillStyle : {}) }}>{label}</button>)}</div></div></div>}
+      {step === 3 && <div style={panelStyle}>
+        <h2>Your location</h2>
+        <SearchableDatabaseSelect label="Preferred location" type="location" value={profile.preferredLocation ?? ""} placeholder="e.g. Melbourne, Ballarat, Sydney" onChange={(preferredLocation) => setProfile((c) => ({ ...c, preferredLocation }))} onSelect={selectLocation} />
+        <div style={{ marginTop: 20 }}><strong>Preferred state(s)</strong><div style={pillRowStyle}>{states.map((state) => <button key={state} type="button" onClick={() => updateState(state)} style={{ ...pillStyle, ...(profile.preferredStates.includes(state) ? selectedPillStyle : {}) }}>{state}</button>)}</div></div>
+        <div style={{ marginTop: 20 }}><strong>Open to regional Australia?</strong><div style={pillRowStyle}><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: true }))} style={{ ...pillStyle, ...(profile.regionalAccepted ? selectedPillStyle : {}) }}>Yes</button><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: false }))} style={{ ...pillStyle, ...(!profile.regionalAccepted ? selectedPillStyle : {}) }}>No</button></div></div>
+      </div>}
 
-      {step === 4 && <div style={panelStyle}><h2>Your location</h2><SearchableDatabaseSelect label="Preferred location" type="location" value={profile.preferredLocation ?? ""} placeholder="e.g. Melbourne, Ballarat, Sydney" onChange={(preferredLocation) => setProfile((c) => ({ ...c, preferredLocation }))} onSelect={selectLocation} /><div style={{ marginTop: 20 }}><strong>Preferred state(s)</strong><div style={pillRowStyle}>{states.map((state) => <button key={state} type="button" onClick={() => updateState(state)} style={{ ...pillStyle, ...(profile.preferredStates.includes(state) ? selectedPillStyle : {}) }}>{state}</button>)}</div></div><div style={{ marginTop: 20 }}><strong>Open to regional Australia?</strong><div style={pillRowStyle}><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: true }))} style={{ ...pillStyle, ...(profile.regionalAccepted ? selectedPillStyle : {}) }}>Yes</button><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: false }))} style={{ ...pillStyle, ...(!profile.regionalAccepted ? selectedPillStyle : {}) }}>No</button></div></div></div>}
+      {step === 4 && <div style={panelStyle}>
+        <h2>Optional details</h2>
+        <p style={mutedStyle}>Skip anything you do not know. These details only refine the match and entry-requirement checks.</p>
+        <div style={gridStyle}>
+          <label style={labelStyle}>Academic average / percentage <span style={optionalLabelStyle}>Optional</span><input type="number" min={0} max={100} step={0.1} value={profile.academicScorePercent ?? ""} onChange={(e) => setProfile((c) => ({ ...c, academicScorePercent: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} placeholder="e.g. 65" /></label>
+          <SearchableDatabaseSelect label="Preferred study area (optional)" type="course" value={profile.preferredStudy ?? ""} placeholder="e.g. Cyber Security" helper="Leave blank if you want UniPath to infer study areas from your career goal." onChange={(preferredStudy) => setProfile((c) => ({ ...c, preferredStudy }))} />
+          <label style={labelStyle}>English test <span style={optionalLabelStyle}>Optional</span><select value={profile.englishTestType ?? "none"} onChange={(e) => setProfile((c) => ({ ...c, englishTestType: e.target.value as EnglishTestType, englishScore: e.target.value === "none" ? undefined : c.englishScore }))} style={inputStyle}><option value="none">Not taken / skip</option><option value="ielts">IELTS</option><option value="pte">PTE Academic</option></select></label>
+          {(profile.englishTestType ?? "none") !== "none" && <label style={labelStyle}>{profile.englishTestType === "pte" ? "PTE overall score" : "IELTS overall score"}<input type="number" min={0} max={profile.englishTestType === "pte" ? 90 : 9} step={profile.englishTestType === "pte" ? 1 : 0.5} value={profile.englishScore ?? ""} onChange={(e) => setProfile((c) => ({ ...c, englishScore: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} /></label>}
+        </div>
+        <div style={{ marginTop: 20 }}><strong>Scholarship preference <span style={optionalLabelStyle}>Optional</span></strong><div style={pillRowStyle}>{([['high','Very important'],['prefer','Prefer if available'],['none','No preference']] as [ScholarshipImportance,string][]).map(([value,label]) => <button key={value} type="button" onClick={() => setProfile((c) => ({ ...c, scholarshipImportance: value }))} style={{ ...pillStyle, ...((profile.scholarshipImportance ?? "none") === value ? selectedPillStyle : {}) }}>{label}</button>)}</div></div>
+      </div>}
 
       <div style={footerStyle}><button type="button" disabled={step === 1} onClick={() => setStep(Math.max(1, step - 1) as QuickStep)} style={secondaryButtonStyle}>← Back</button>{step < 4 ? <button type="button" onClick={() => setStep((step + 1) as QuickStep)} style={primaryButtonStyle}>Continue →</button> : <button type="button" onClick={showQuickResult} style={primaryButtonStyle}>Get Match Score →</button>}</div>
     </section>}
@@ -225,6 +243,7 @@ const progressTrackStyle = { height: 8, background: "#e9edf2", borderRadius: 999
 const progressFillStyle = { height: "100%", background: "#d81b60", borderRadius: 999 } as const;
 const gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 16 } as const;
 const labelStyle = { display: "grid", gap: 7, fontWeight: 750 } as const;
+const optionalLabelStyle = { fontSize: 11, color: "#667085", fontWeight: 650 } as const;
 const inputStyle = { width: "100%", boxSizing: "border-box", padding: "11px 12px", border: "1px solid #cfd5df", borderRadius: 9, background: "#fff" } as const;
 const pillRowStyle = { display: "flex", gap: 9, flexWrap: "wrap", marginTop: 10 } as const;
 const pillStyle = { border: "1px solid #cfd5df", background: "#fff", borderRadius: 9, padding: "9px 13px", fontWeight: 750, cursor: "pointer" } as const;
