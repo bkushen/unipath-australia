@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
+const COURSE_BATCH_SIZE = 1000;
+const ENRICHMENT_SHORTLIST_SIZE = 300;
+const RESULT_LIMIT = 12;
+
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 const words = (value: string) => value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
@@ -8,7 +12,9 @@ function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) throw new Error("Supabase public environment variables are missing.");
-  return createSupabaseClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+  return createSupabaseClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
 }
 
 function textScore(query: string, ...values: Array<string | null | undefined>) {
@@ -35,6 +41,29 @@ function affordabilityScore(totalFee: number | null, annualFee: number | null, f
   return clamp(ratio(semester, semesterBudget) * 0.45 + ratio(totalFee, fullBudget) * 0.55);
 }
 
+function courseFees(course: {
+  annual_fee: unknown;
+  total_fee: unknown;
+  cricos_tuition_fee_total: unknown;
+  cricos_estimated_total_cost: unknown;
+  duration_months: unknown;
+}) {
+  const totalFee = course.total_fee != null
+    ? Number(course.total_fee)
+    : course.cricos_tuition_fee_total != null
+      ? Number(course.cricos_tuition_fee_total)
+      : course.cricos_estimated_total_cost != null
+        ? Number(course.cricos_estimated_total_cost)
+        : null;
+  const durationMonths = course.duration_months == null ? null : Number(course.duration_months);
+  const annualFee = course.annual_fee != null
+    ? Number(course.annual_fee)
+    : totalFee && durationMonths
+      ? totalFee / Math.max(durationMonths / 12, 1)
+      : null;
+  return { totalFee, annualFee };
+}
+
 export async function GET(request: NextRequest) {
   const supabase = getSupabase();
   const params = request.nextUrl.searchParams;
@@ -50,47 +79,95 @@ export async function GET(request: NextRequest) {
   const fullBudget = Number(params.get("fullBudget") ?? 80000);
 
   try {
-    let courseQuery = supabase
-      .from("courses")
-      .select("id,university_id,study_field_id,name,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,delivery_mode,official_course_url,cricos_tuition_fee_total,cricos_estimated_total_cost,cricos_expired")
-      .or("cricos_expired.is.null,cricos_expired.eq.false")
-      .limit(150);
+    const { data: studyFields, error: studyFieldError } = await supabase
+      .from("study_fields")
+      .select("id,name");
+    if (studyFieldError) throw studyFieldError;
+    const fieldMap = new Map((studyFields ?? []).map((item) => [item.id, item.name]));
 
-    if (study) {
-      const safe = study.replace(/[%_,()]/g, " ").trim();
-      if (safe) courseQuery = courseQuery.or(`name.ilike.%${safe}%,qualification_level.ilike.%${safe}%`);
+    const allCourses: Array<{
+      id: string;
+      university_id: string;
+      study_field_id: string | null;
+      name: string;
+      qualification_level: string | null;
+      cricos_code: string | null;
+      duration_months: number | null;
+      annual_fee: number | string | null;
+      total_fee: number | string | null;
+      currency: string | null;
+      delivery_mode: string | null;
+      official_course_url: string | null;
+      cricos_tuition_fee_total: number | string | null;
+      cricos_estimated_total_cost: number | string | null;
+      cricos_expired: boolean | null;
+    }> = [];
+
+    for (let from = 0; ; from += COURSE_BATCH_SIZE) {
+      const { data: batch, error: batchError } = await supabase
+        .from("courses")
+        .select("id,university_id,study_field_id,name,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,delivery_mode,official_course_url,cricos_tuition_fee_total,cricos_estimated_total_cost,cricos_expired")
+        .or("cricos_expired.is.null,cricos_expired.eq.false")
+        .order("id")
+        .range(from, from + COURSE_BATCH_SIZE - 1);
+      if (batchError) throw batchError;
+      if (!batch?.length) break;
+      allCourses.push(...batch);
+      if (batch.length < COURSE_BATCH_SIZE) break;
     }
 
-    const { data: courses, error: courseError } = await courseQuery;
-    if (courseError) throw courseError;
-    if (!courses?.length) return NextResponse.json({ recommendations: [], totalCandidates: 0, source: "SUPABASE" });
+    if (!allCourses.length) {
+      return NextResponse.json({ recommendations: [], totalCandidates: 0, enrichedCandidates: 0, source: "SUPABASE" });
+    }
 
+    const preliminary = allCourses
+      .map((course) => {
+        const studyField = course.study_field_id ? fieldMap.get(course.study_field_id) ?? null : null;
+        const academic = textScore(study || field, studyField, course.name, course.qualification_level);
+        const career = textScore(occupation, course.name, studyField, course.qualification_level);
+        const { totalFee, annualFee } = courseFees(course);
+        const affordability = affordabilityScore(totalFee, annualFee, fullBudget, semesterBudget);
+        const studyPreference = textScore(study, course.name, studyField);
+        const preliminaryScore = clamp(academic * 0.34 + career * 0.34 + affordability * 0.22 + studyPreference * 0.10);
+        return { course, studyField, academic, career, affordability, preliminaryScore, totalFee, annualFee };
+      })
+      .sort((a, b) => b.preliminaryScore - a.preliminaryScore)
+      .slice(0, ENRICHMENT_SHORTLIST_SIZE);
+
+    const courses = preliminary.map((item) => item.course);
     const universityIds = [...new Set(courses.map((item) => item.university_id).filter(Boolean))];
-    const fieldIds = [...new Set(courses.map((item) => item.study_field_id).filter(Boolean))];
     const courseIds = courses.map((item) => item.id);
 
-    const [{ data: universities }, { data: studyFields }, { data: campusLinks }, { data: occupationLinks }, { data: scholarshipLinks }, { data: skilledLinks }] = await Promise.all([
+    const [{ data: universities, error: universityError }, { data: campusLinks, error: campusLinkError }, { data: occupationLinks, error: occupationLinkError }, { data: scholarshipLinks, error: scholarshipLinkError }, { data: skilledLinks, error: skilledLinkError }] = await Promise.all([
       supabase.from("universities").select("id,name,website,logo_url,cricos_code").in("id", universityIds),
-      fieldIds.length ? supabase.from("study_fields").select("id,name").in("id", fieldIds) : Promise.resolve({ data: [] }),
       supabase.from("course_campuses").select("course_id,campus_id").in("course_id", courseIds),
       supabase.from("course_occupations").select("course_id,occupation_id,alignment_score").in("course_id", courseIds),
       supabase.from("course_scholarships").select("course_id,scholarship_id").in("course_id", courseIds),
       supabase.from("course_skilled_occupation_links").select("course_id,skilled_occupation_id,confidence").in("course_id", courseIds),
     ]);
+    if (universityError) throw universityError;
+    if (campusLinkError) throw campusLinkError;
+    if (occupationLinkError) throw occupationLinkError;
+    if (scholarshipLinkError) throw scholarshipLinkError;
+    if (skilledLinkError) throw skilledLinkError;
 
     const campusIds = [...new Set((campusLinks ?? []).map((item) => item.campus_id))];
     const occupationIds = [...new Set((occupationLinks ?? []).map((item) => item.occupation_id))];
     const scholarshipIds = [...new Set((scholarshipLinks ?? []).map((item) => item.scholarship_id))];
 
-    const [{ data: campuses }, { data: occupations }, { data: scholarships }, { data: livingCosts }] = await Promise.all([
-      campusIds.length ? supabase.from("campuses").select("id,name,city,state,postcode,regional,regional_verified,regional_classification").in("id", campusIds) : Promise.resolve({ data: [] }),
-      occupationIds.length ? supabase.from("occupations").select("id,name").in("id", occupationIds) : Promise.resolve({ data: [] }),
-      scholarshipIds.length ? supabase.from("scholarships").select("id,name,amount,percentage").in("id", scholarshipIds) : Promise.resolve({ data: [] }),
-      campusIds.length ? supabase.from("living_costs").select("campus_id,weekly_low,weekly_high,monthly_estimate,verification_status").in("campus_id", campusIds) : Promise.resolve({ data: [] }),
+    const [{ data: campuses, error: campusError }, { data: occupations, error: occupationError }, { data: scholarships, error: scholarshipError }, { data: livingCosts, error: livingCostError }] = await Promise.all([
+      campusIds.length ? supabase.from("campuses").select("id,name,city,state,postcode,regional,regional_verified,regional_classification").in("id", campusIds) : Promise.resolve({ data: [], error: null }),
+      occupationIds.length ? supabase.from("occupations").select("id,name").in("id", occupationIds) : Promise.resolve({ data: [], error: null }),
+      scholarshipIds.length ? supabase.from("scholarships").select("id,name,amount,percentage").in("id", scholarshipIds) : Promise.resolve({ data: [], error: null }),
+      campusIds.length ? supabase.from("living_costs").select("campus_id,weekly_low,weekly_high,monthly_estimate,verification_status").in("campus_id", campusIds) : Promise.resolve({ data: [], error: null }),
     ]);
+    if (campusError) throw campusError;
+    if (occupationError) throw occupationError;
+    if (scholarshipError) throw scholarshipError;
+    if (livingCostError) throw livingCostError;
 
+    const preliminaryMap = new Map(preliminary.map((item) => [item.course.id, item]));
     const universityMap = new Map((universities ?? []).map((item) => [item.id, item]));
-    const fieldMap = new Map((studyFields ?? []).map((item) => [item.id, item.name]));
     const campusMap = new Map((campuses ?? []).map((item) => [item.id, item]));
     const occupationMap = new Map((occupations ?? []).map((item) => [item.id, item.name]));
     const scholarshipMap = new Map((scholarships ?? []).map((item) => [item.id, item]));
@@ -109,7 +186,8 @@ export async function GET(request: NextRequest) {
       const university = universityMap.get(course.university_id);
       const linkedCampusIds = campusesByCourse.get(course.id) ?? [];
       const linkedCampuses = linkedCampusIds.map((id) => campusMap.get(id)).filter(Boolean);
-      if (!university || linkedCampuses.length === 0) return [];
+      const base = preliminaryMap.get(course.id);
+      if (!university || linkedCampuses.length === 0 || !base) return [];
 
       const bestCampus = linkedCampuses
         .map((campus) => {
@@ -121,23 +199,26 @@ export async function GET(request: NextRequest) {
         })
         .sort((a, b) => b.score - a.score)[0];
 
-      const studyField = fieldMap.get(course.study_field_id) ?? null;
       const linkedOccupationRows = occupationsByCourse.get(course.id) ?? [];
       const occupationNames = linkedOccupationRows.map((item) => occupationMap.get(item.id)).filter(Boolean) as string[];
-      const career = occupationNames.length ? Math.max(...occupationNames.map((name) => textScore(occupation, name))) : textScore(occupation, course.name, studyField);
-      const academic = textScore(study || field, studyField, course.name, course.qualification_level);
-
-      const totalFee = course.total_fee != null ? Number(course.total_fee) : course.cricos_tuition_fee_total != null ? Number(course.cricos_tuition_fee_total) : course.cricos_estimated_total_cost != null ? Number(course.cricos_estimated_total_cost) : null;
-      const annualFee = course.annual_fee != null ? Number(course.annual_fee) : totalFee && course.duration_months ? totalFee / Math.max(course.duration_months / 12, 1) : null;
-      const affordability = affordabilityScore(totalFee, annualFee, fullBudget, semesterBudget);
+      const career = occupationNames.length
+        ? Math.max(base.career, ...occupationNames.map((name) => textScore(occupation, name)))
+        : base.career;
 
       const scholarshipIdsForCourse = scholarshipsByCourse.get(course.id) ?? [];
       const linkedScholarships = scholarshipIdsForCourse.map((id) => scholarshipMap.get(id)).filter(Boolean);
-      const bestScholarship = linkedScholarships.sort((a, b) => (Number(b!.percentage ?? 0) - Number(a!.percentage ?? 0)) || (Number(b!.amount ?? 0) - Number(a!.amount ?? 0)))[0] ?? null;
-      const scholarshipBoost = scholarshipImportance === "high" ? (bestScholarship ? 8 : -10) : scholarshipImportance === "prefer" ? (bestScholarship ? 5 : 0) : 0;
+      const bestScholarship = linkedScholarships.sort((a, b) =>
+        (Number(b!.percentage ?? 0) - Number(a!.percentage ?? 0)) ||
+        (Number(b!.amount ?? 0) - Number(a!.amount ?? 0)),
+      )[0] ?? null;
+      const scholarshipBoost = scholarshipImportance === "high"
+        ? (bestScholarship ? 8 : -10)
+        : scholarshipImportance === "prefer"
+          ? (bestScholarship ? 5 : 0)
+          : 0;
       const migration = migrationByCourse.get(course.id) ?? 45;
       const migrationWeight = migrationImportance === "high" ? 0.2 : migrationImportance === "consider" ? 0.1 : 0;
-      const baseOverall = academic * 0.28 + career * 0.3 + affordability * 0.22 + bestCampus.score * 0.2;
+      const baseOverall = base.academic * 0.28 + career * 0.3 + base.affordability * 0.22 + bestCampus.score * 0.2;
       const overall = clamp(baseOverall * (1 - migrationWeight) + migration * migrationWeight + scholarshipBoost);
       const living = livingMap.get(bestCampus.campus.id) ?? null;
 
@@ -148,30 +229,60 @@ export async function GET(request: NextRequest) {
           qualificationLevel: course.qualification_level,
           cricosCode: course.cricos_code,
           durationMonths: course.duration_months,
-          annualFee,
-          totalFee,
+          annualFee: base.annualFee,
+          totalFee: base.totalFee,
           currency: course.currency || "AUD",
           deliveryMode: course.delivery_mode,
           officialCourseUrl: course.official_course_url,
-          studyField,
+          studyField: base.studyField,
         },
-        university: { id: university.id, name: university.name, website: university.website, logoUrl: university.logo_url, cricosCode: university.cricos_code },
+        university: {
+          id: university.id,
+          name: university.name,
+          website: university.website,
+          logoUrl: university.logo_url,
+          cricosCode: university.cricos_code,
+        },
         campus: bestCampus.campus,
-        scholarship: bestScholarship ? { id: bestScholarship.id, name: bestScholarship.name, percentage: bestScholarship.percentage == null ? null : Number(bestScholarship.percentage), amount: bestScholarship.amount == null ? null : Number(bestScholarship.amount) } : null,
-        livingCost: living ? { weeklyLow: Number(living.weekly_low), weeklyHigh: Number(living.weekly_high), monthlyEstimate: Number(living.monthly_estimate), status: living.verification_status } : null,
-        scores: { academic, career, affordability, location: bestCampus.score, migration, overall },
+        scholarship: bestScholarship ? {
+          id: bestScholarship.id,
+          name: bestScholarship.name,
+          percentage: bestScholarship.percentage == null ? null : Number(bestScholarship.percentage),
+          amount: bestScholarship.amount == null ? null : Number(bestScholarship.amount),
+        } : null,
+        livingCost: living ? {
+          weeklyLow: Number(living.weekly_low),
+          weeklyHigh: Number(living.weekly_high),
+          monthlyEstimate: Number(living.monthly_estimate),
+          status: living.verification_status,
+        } : null,
+        scores: {
+          academic: base.academic,
+          career,
+          affordability: base.affordability,
+          location: bestCampus.score,
+          migration,
+          overall,
+        },
         reasons: [
-          academic >= 80 ? "Strong study-field match." : null,
+          base.academic >= 80 ? "Strong study-field match." : null,
           career >= 80 ? "Strong career-direction match from available occupation/course evidence." : null,
-          affordability >= 80 ? "Tuition is within or close to the stated budget using available fee data." : null,
+          base.affordability >= 80 ? "Tuition is within or close to the stated budget using available fee data." : null,
           bestCampus.score >= 85 ? "Campus matches the selected location preferences." : null,
           bestScholarship ? "A verified scholarship record is linked to this course." : null,
           living ? "A source-dated living-cost estimate is available for this campus." : null,
         ].filter(Boolean),
       }];
-    }).sort((a, b) => b.scores.overall - a.scores.overall).slice(0, 12);
+    })
+      .sort((a, b) => b.scores.overall - a.scores.overall)
+      .slice(0, RESULT_LIMIT);
 
-    return NextResponse.json({ recommendations, totalCandidates: courses.length, source: "SUPABASE" });
+    return NextResponse.json({
+      recommendations,
+      totalCandidates: allCourses.length,
+      enrichedCandidates: courses.length,
+      source: "SUPABASE_FULL_CATALOGUE",
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("Live recommendations failed", detail);
