@@ -53,15 +53,18 @@ const demoRatesToAud: Record<string, number> = {
 
 export const demoSupportedCurrencies = Object.keys(demoRatesToAud).sort();
 
+export function getDemoRateToAud(currency: string): number {
+  const rate = demoRatesToAud[currency.toUpperCase()];
+  if (rate === undefined) throw new Error(`No DEMO exchange-rate fixture exists for ${currency}.`);
+  return rate;
+}
+
 export class DemoExchangeRateProvider implements ExchangeRateProvider {
   async getRate(fromCurrency: string, toCurrency: "AUD" = "AUD"): Promise<ExchangeRateQuote> {
     const currency = fromCurrency.toUpperCase();
     if (toCurrency !== "AUD") throw new Error("Local V2 demo provider only converts to AUD.");
 
-    const rateToAud = demoRatesToAud[currency];
-    if (rateToAud === undefined) {
-      throw new Error(`No DEMO exchange-rate fixture exists for ${currency}.`);
-    }
+    const rateToAud = getDemoRateToAud(currency);
 
     return {
       fromCurrency: currency,
