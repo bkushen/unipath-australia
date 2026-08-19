@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type FxResponse = {
   fromCurrency: string;
@@ -41,12 +41,18 @@ export function CurrencyBudgetInput({
   const [supported, setSupported] = useState<string[]>(commonCurrencies);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const callbackRef = useRef(onAudCentsChange);
+
+  useEffect(() => {
+    callbackRef.current = onAudCentsChange;
+  }, [onAudCentsChange]);
 
   useEffect(() => {
     if (currency === "AUD") {
       setQuote(null);
       setError("");
-      onAudCentsChange(Math.round(amount * 100));
+      const next = Math.round(amount * 100);
+      if (next !== audCents) callbackRef.current(next);
       return;
     }
 
@@ -63,7 +69,8 @@ export function CurrencyBudgetInput({
 
         setQuote(data);
         if (data.supportedCurrencies?.length) setSupported(data.supportedCurrencies);
-        onAudCentsChange(Math.round(amount * data.rateToAud * 100));
+        const next = Math.round(amount * data.rateToAud * 100);
+        if (next !== audCents) callbackRef.current(next);
       } catch (err) {
         if ((err as Error).name !== "AbortError") setError((err as Error).message);
       } finally {
@@ -75,7 +82,7 @@ export function CurrencyBudgetInput({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [amount, currency, onAudCentsChange]);
+  }, [amount, audCents, currency]);
 
   const audValue = useMemo(() => {
     if (currency === "AUD") return amount;
@@ -83,9 +90,7 @@ export function CurrencyBudgetInput({
     return amount * quote.rateToAud;
   }, [amount, audCents, currency, quote]);
 
-  const currencyOptions = useMemo(() => {
-    return Array.from(new Set([...commonCurrencies, ...supported])).sort();
-  }, [supported]);
+  const currencyOptions = useMemo(() => Array.from(new Set([...commonCurrencies, ...supported])).sort(), [supported]);
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
