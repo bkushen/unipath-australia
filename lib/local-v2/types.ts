@@ -1,6 +1,7 @@
 export type AustralianState = "VIC" | "NSW" | "QLD" | "SA" | "WA" | "TAS" | "ACT" | "NT";
 
 export type MigrationImportance = "none" | "consider" | "high";
+export type ScholarshipImportance = "none" | "prefer" | "high";
 export type AssessmentMode = "quick" | "detailed";
 export type VerificationStatus = "DEMO" | "VERIFIED" | "ESTIMATED" | "UNVERIFIED";
 
@@ -21,6 +22,9 @@ export interface StudentDecisionProfile {
   qualificationField: string;
   desiredOccupation: string;
   annualTuitionBudgetCents: number;
+  semesterTuitionBudgetCents?: number;
+  fullCourseBudgetCents?: number;
+  scholarshipImportance?: ScholarshipImportance;
   totalFundsCents: number;
   preferredStates: AustralianState[];
   regionalAccepted: boolean;
