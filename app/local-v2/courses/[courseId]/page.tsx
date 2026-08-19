@@ -27,7 +27,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
 
   const { data: course, error: courseError } = await supabase
     .from("courses")
-    .select("id,university_id,study_field_id,name,slug,qualification_level,cricos_code,university_course_code,duration_months,annual_fee,total_fee,currency,description,delivery_mode,course_language,dual_qualification,foundation_studies,work_component,work_component_hours_week,work_component_weeks,work_component_total_hours,cricos_duration_weeks,cricos_tuition_fee_total,cricos_non_tuition_fee_total,cricos_estimated_total_cost,official_course_url,official_course_url_verified_at,source_url,verified_at,verification_status,cricos_source_url,cricos_retrieved_at,cricos_expired")
+    .select("id,university_id,study_field_id,name,slug,qualification_level,cricos_code,university_course_code,duration_months,annual_fee,total_fee,currency,description,delivery_mode,course_language,dual_qualification,foundation_studies,work_component,work_component_hours_week,work_component_weeks,work_component_total_hours,cricos_duration_weeks,cricos_tuition_fee_total,cricos_non_tuition_fee_total,cricos_estimated_total_cost,cricos_field_1_narrow,cricos_field_1_detailed,official_course_url,official_course_url_verified_at,source_url,verified_at,verification_status,cricos_source_url,cricos_retrieved_at,cricos_expired")
     .eq("id", courseId)
     .maybeSingle();
 
@@ -63,7 +63,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
   const skilledMap = new Map((skilledOccupations ?? []).map((item) => [item.id, item]));
   const officialUrl = ensureUrl(course.official_course_url) || ensureUrl(university?.website);
   const logoUrl = ensureUrl(university?.logo_url);
-  const initials = (university?.name ?? "University").split(/\s+/).filter(Boolean).slice(0, 3).map((word) => word[0]).join("").toUpperCase();
+  const initials = (university?.name ?? "University").split(/\s+/).filter(Boolean).slice(0, 3).map((word: string) => word[0]).join("").toUpperCase();
   const latestInternationalFee = (fees ?? []).find((fee) => fee.student_type?.toLowerCase().includes("international")) ?? fees?.[0];
   const annualFee = latestInternationalFee?.annual_fee != null ? Number(latestInternationalFee.annual_fee) : course.annual_fee == null ? null : Number(course.annual_fee);
   const totalFee = latestInternationalFee?.total_fee != null ? Number(latestInternationalFee.total_fee) : course.total_fee == null ? null : Number(course.total_fee);
