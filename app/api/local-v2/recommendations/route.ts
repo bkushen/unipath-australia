@@ -4,6 +4,8 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 const COURSE_BATCH_SIZE = 1000;
 const ENRICHMENT_SHORTLIST_SIZE = 300;
 const RESULT_LIMIT = 12;
+const PRIMARY_UNIVERSITY_LIMIT = 2;
+const PRIMARY_CAMPUS_LIMIT = 2;
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 const words = (value: string) => value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
@@ -225,7 +227,7 @@ export async function GET(request: NextRequest) {
     const migrationByCourse = new Map<string, number>();
     for (const link of skilledLinks ?? []) migrationByCourse.set(link.course_id, Math.max(migrationByCourse.get(link.course_id) ?? 0, link.confidence === "high" ? 90 : link.confidence === "medium" ? 75 : 60));
 
-    const recommendations = courses.flatMap((course) => {
+    const rankedRecommendations = courses.flatMap((course) => {
       const university = universityMap.get(course.university_id);
       const linkedCampusIds = campusesByCourse.get(course.id) ?? [];
       const linkedCampuses = linkedCampusIds.map((id) => campusMap.get(id)).filter(Boolean);
@@ -322,9 +324,35 @@ export async function GET(request: NextRequest) {
           living ? "A source-dated living-cost estimate is available for this campus." : null,
         ].filter(Boolean),
       }];
-    })
-      .sort((a, b) => b.scores.overall - a.scores.overall)
-      .slice(0, RESULT_LIMIT);
+    }).sort((a, b) => b.scores.overall - a.scores.overall);
+
+    const recommendations: typeof rankedRecommendations = [];
+    const selectedCourseIds = new Set<string>();
+    const universityCounts = new Map<string, number>();
+    const campusCounts = new Map<string, number>();
+
+    for (const candidate of rankedRecommendations) {
+      if (recommendations.length >= RESULT_LIMIT) break;
+      const universityCount = universityCounts.get(candidate.university.id) ?? 0;
+      const campusCount = campusCounts.get(candidate.campus.id) ?? 0;
+      if (universityCount >= PRIMARY_UNIVERSITY_LIMIT || campusCount >= PRIMARY_CAMPUS_LIMIT) continue;
+      recommendations.push(candidate);
+      selectedCourseIds.add(candidate.course.id);
+      universityCounts.set(candidate.university.id, universityCount + 1);
+      campusCounts.set(candidate.campus.id, campusCount + 1);
+    }
+
+    if (recommendations.length < RESULT_LIMIT) {
+      for (const candidate of rankedRecommendations) {
+        if (recommendations.length >= RESULT_LIMIT) break;
+        if (selectedCourseIds.has(candidate.course.id)) continue;
+        recommendations.push(candidate);
+        selectedCourseIds.add(candidate.course.id);
+      }
+    }
+
+    const representedUniversities = new Set(recommendations.map((item) => item.university.id)).size;
+    const representedCampuses = new Set(recommendations.map((item) => item.campus.id)).size;
 
     return NextResponse.json({
       recommendations,
@@ -332,6 +360,12 @@ export async function GET(request: NextRequest) {
       enrichedCandidates: courses.length,
       source: "SUPABASE_FULL_CATALOGUE",
       careerMatching: "explicit_mappings_plus_inferred_course_text",
+      diversity: {
+        primaryUniversityLimit: PRIMARY_UNIVERSITY_LIMIT,
+        primaryCampusLimit: PRIMARY_CAMPUS_LIMIT,
+        representedUniversities,
+        representedCampuses,
+      },
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
