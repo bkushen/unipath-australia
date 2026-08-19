@@ -1,77 +1,30 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { demoCampuses, demoCourses, demoSuburbs, demoUniversities } from "@/lib/local-v2/fixtures";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-function money(cents: number) {
-  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(cents / 100);
+function getSupabase(){const url=process.env.NEXT_PUBLIC_SUPABASE_URL;const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;if(!url||!key)throw new Error("Supabase public environment variables are missing.");return createSupabaseClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}})}
+const money=(value:number|null|undefined)=>value==null?"Not loaded":new Intl.NumberFormat("en-AU",{style:"currency",currency:"AUD",maximumFractionDigits:0}).format(Number(value));
+const date=(value:string|null|undefined)=>value?new Intl.DateTimeFormat("en-AU",{dateStyle:"medium"}).format(new Date(value)):"Not loaded";
+
+export default async function LocationDetailPage({params}:{params:Promise<{suburbId:string}>}){
+  const {suburbId}=await params; const supabase=getSupabase();
+  const {data:campus,error}=await supabase.from("campuses").select("id,university_id,name,city,state,postcode,regional,regional_verified,regional_classification,latitude,longitude,address_line_1,address_line_2,address_line_3,address_line_4,source_url,verified_at,regional_source_url,regional_verified_at").eq("id",suburbId).maybeSingle();
+  if(error)throw new Error(error.message); if(!campus)notFound();
+  const [{data:university},{data:costs},{data:links}]=await Promise.all([
+    supabase.from("universities").select("id,name,website,logo_url,cricos_code").eq("id",campus.university_id).maybeSingle(),
+    supabase.from("living_costs").select("id,category,weekly_low,weekly_high,monthly_estimate,source_url,verified_at,verification_status").eq("campus_id",campus.id),
+    supabase.from("course_campuses").select("course_id").eq("campus_id",campus.id).limit(20),
+  ]);
+  const courseIds=(links??[]).map((x)=>x.course_id); const {data:courses}=courseIds.length?await supabase.from("courses").select("id,name,qualification_level,annual_fee,currency,duration_months,cricos_code,official_course_url").in("id",courseIds).or("cricos_expired.is.null,cricos_expired.eq.false").order("name"):{data:[]};
+  const address=[campus.address_line_1,campus.address_line_2,campus.address_line_3,campus.address_line_4,campus.city,campus.state,campus.postcode].filter(Boolean).join(", ");
+  return <main style={{minHeight:"100vh",background:"#f5f7fa",color:"#101828"}}><section style={{background:"#0057b8",color:"#fff",padding:"34px 20px"}}><div style={{maxWidth:1050,margin:"0 auto"}}><Link href="/local-v2/suburbs" style={{color:"#fff"}}>← Back to Living in Australia</Link><div style={{marginTop:16,color:"#dbeafe",fontWeight:800}}>{university?.name??"University"}</div><h1 style={{fontSize:40,margin:"6px 0"}}>{campus.name}</h1><div>{address||"Address not loaded"}</div></div></section><div style={{maxWidth:1050,margin:"0 auto",padding:"24px 20px 70px"}}>
+    <section style={grid}><Stat label="State" value={campus.state||"Not loaded"}/><Stat label="City" value={campus.city||"Not loaded"}/><Stat label="Regional" value={campus.regional?"Yes":"No"}/><Stat label="Regional status" value={campus.regional_verified?"Verified":"Not independently verified"}/><Stat label="Postcode" value={campus.postcode||"Not loaded"}/><Stat label="CRICOS provider" value={university?.cricos_code||"Not loaded"}/></section>
+    <section style={{...panel,marginTop:16}}><h2 style={{marginTop:0}}>Regional classification</h2><p><strong>Classification:</strong> {campus.regional_classification||"Not loaded"}</p><p><strong>Last verified:</strong> {date(campus.regional_verified_at)}</p>{campus.regional_source_url&&<a href={campus.regional_source_url} target="_blank" rel="noreferrer">Regional classification source ↗</a>}<p style={{color:"#667085"}}>Regional classification can affect some migration or study incentives, but it does not by itself create visa eligibility.</p></section>
+    <section style={{...panel,marginTop:16}}><h2 style={{marginTop:0}}>Living-cost information</h2>{(costs??[]).length?(costs??[]).map((c)=><div key={c.id} style={{padding:"12px 0",borderTop:"1px solid #eef1f4"}}><strong>{c.category}</strong><div>Weekly range: {money(c.weekly_low)}–{money(c.weekly_high)}</div><div>Monthly estimate: {money(c.monthly_estimate)}</div><div style={{color:"#667085"}}>Status: {c.verification_status||"Not stated"} · verified {date(c.verified_at)}</div>{c.source_url&&<a href={c.source_url} target="_blank" rel="noreferrer">Living-cost source ↗</a>}</div>):<p style={{color:"#667085"}}>A verified living-cost record has not been loaded for this campus yet.</p>}</section>
+    <section style={{...panel,marginTop:16}}><h2 style={{marginTop:0}}>Courses at this campus</h2>{(courses??[]).length?<div style={{display:"grid",gap:10}}>{(courses??[]).map((course)=><div key={course.id} style={{border:"1px solid #e4e7ec",borderRadius:11,padding:13}}><strong>{course.name}</strong><div style={{color:"#667085",marginTop:4}}>{course.qualification_level||"Qualification not loaded"}{course.cricos_code?` · CRICOS ${course.cricos_code}`:""}</div><div style={{marginTop:4}}>{money(course.annual_fee)} / year{course.duration_months?` · ${course.duration_months} months`:""}</div><div style={{display:"flex",gap:12,marginTop:8,flexWrap:"wrap"}}><Link href={`/local-v2/courses/${course.id}`}>View course →</Link>{course.official_course_url&&<a href={course.official_course_url} target="_blank" rel="noreferrer">Official course page ↗</a>}</div></div>)}</div>:<p style={{color:"#667085"}}>No active courses were returned for this campus.</p>}</section>
+    <section style={{marginTop:16,display:"flex",gap:10,flexWrap:"wrap"}}><Link href="/local-v2/commute" style={button}>Open commute calculator</Link><Link href="/local-v2/courses" style={secondary}>Browse courses</Link>{university&&<Link href={`/local-v2/universities/${university.id}`} style={secondary}>University profile</Link>}</section>
+    <section style={{...panel,marginTop:16,background:"#fff7ed",borderColor:"#fed7aa"}}><strong>Data note:</strong> Location and regional fields come from the live UniPath database. Living costs appear only where source-dated records have been loaded and should be treated as indicative rather than a personal budget guarantee.</section>
+  </div></main>
 }
-
-export default async function SuburbDetailPage({ params }: { params: Promise<{ suburbId: string }> }) {
-  const { suburbId } = await params;
-  const suburb = demoSuburbs.find((item) => item.id === suburbId);
-  if (!suburb) notFound();
-
-  const campus = demoCampuses.find((item) => item.suburbId === suburb.id);
-  const university = campus ? demoUniversities.find((item) => item.id === campus.universityId) : undefined;
-  const courses = campus ? demoCourses.filter((item) => item.campusId === campus.id) : [];
-  const weeklyTotal = suburb.weeklyRentCents + suburb.weeklyGroceriesCents + suburb.weeklyUtilitiesCents + suburb.weeklyPersonalCents;
-  const monthlyApprox = Math.round((weeklyTotal * 52) / 12);
-  const annualTotal = weeklyTotal * 52;
-
-  return (
-    <main style={{ maxWidth: 1000, margin: "0 auto", padding: "32px 18px 70px", background: "#f6f8fb", minHeight: "100vh" }}>
-      <Link href="/local-v2/suburbs">← Back to suburbs</Link>
-      <div style={{ marginTop: 16, marginBottom: 20 }}>
-        <span style={{ display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff2cc", fontWeight: 750 }}>LOCAL DEMO SUBURB</span>
-        <h1 style={{ marginBottom: 8 }}>{suburb.name}</h1>
-        <p style={{ color: "#586174" }}>Basic local living-cost view connected to campus, university, courses and commute tools.</p>
-      </div>
-
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14 }}>
-        {[
-          ["State", suburb.state],
-          ["Weekly total", money(weeklyTotal)],
-          ["Monthly approx.", money(monthlyApprox)],
-          ["Annual living cost", money(annualTotal)],
-          ["Linked campus", campus?.name ?? "None"],
-          ["University", university?.name ?? "None"],
-        ].map(([label, value]) => (
-          <article key={label} style={{ border: "1px solid #dfe3ea", borderRadius: 14, padding: 16, background: "#fff" }}>
-            <div style={{ fontSize: 13, color: "#667085", fontWeight: 750 }}>{label}</div>
-            <div style={{ marginTop: 5, fontSize: 19, fontWeight: 800 }}>{value}</div>
-          </article>
-        ))}
-      </section>
-
-      <section style={{ marginTop: 16, border: "1px solid #dfe3ea", borderRadius: 16, padding: 18, background: "#fff" }}>
-        <h2 style={{ marginTop: 0 }}>Weekly cost breakdown</h2>
-        <p><strong>Rent:</strong> {money(suburb.weeklyRentCents)}</p>
-        <p><strong>Groceries:</strong> {money(suburb.weeklyGroceriesCents)}</p>
-        <p><strong>Utilities:</strong> {money(suburb.weeklyUtilitiesCents)}</p>
-        <p><strong>Personal spending:</strong> {money(suburb.weeklyPersonalCents)}</p>
-      </section>
-
-      <section style={{ marginTop: 16, border: "1px solid #dfe3ea", borderRadius: 16, padding: 18, background: "#fff" }}>
-        <h2 style={{ marginTop: 0 }}>Study options near this suburb</h2>
-        {courses.length === 0 ? <p>No demo courses are linked to this suburb yet.</p> : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {courses.map((course) => (
-              <Link key={course.id} href={`/local-v2/courses/${course.id}`} style={{ padding: 12, borderRadius: 10, border: "1px solid #dfe3ea", textDecoration: "none" }}>
-                <strong>{course.name}</strong><br />{money(course.annualTuitionCents)} per year
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <Link href="/local-v2/commute" style={{ padding: "10px 14px", borderRadius: 10, background: "#111827", color: "#fff", textDecoration: "none", fontWeight: 750 }}>Open commute calculator</Link>
-        <Link href="/local-v2/finance" style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #cfd5df", textDecoration: "none", fontWeight: 750 }}>Open finance calculator</Link>
-      </section>
-
-      <section style={{ marginTop: 16, border: "1px solid #fed7aa", borderRadius: 16, padding: 18, background: "#fff7ed" }}>
-        <strong>Demo notice:</strong> These living costs are illustrative only. Production values will use source-dated external data and user-selectable accommodation assumptions.
-      </section>
-    </main>
-  );
-}
+function Stat({label,value}:{label:string;value:string}){return <div style={panel}><div style={{fontSize:12,color:"#667085",fontWeight:800,textTransform:"uppercase"}}>{label}</div><div style={{fontSize:19,fontWeight:850,marginTop:5}}>{value}</div></div>}
+const grid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:12} as const; const panel={background:"#fff",border:"1px solid #e4e7ec",borderRadius:14,padding:16} as const; const button={padding:"10px 14px",background:"#0057b8",color:"#fff",borderRadius:9,textDecoration:"none",fontWeight:800} as const; const secondary={padding:"10px 14px",border:"1px solid #d0d5dd",borderRadius:9,textDecoration:"none",fontWeight:750,color:"#344054",background:"#fff"} as const;
