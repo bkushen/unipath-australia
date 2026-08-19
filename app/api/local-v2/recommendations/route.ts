@@ -27,6 +27,49 @@ function textScore(query: string, ...values: Array<string | null | undefined>) {
   return clamp(45 + overlap * 18);
 }
 
+const careerDomains: Array<{ triggers: string[]; courseTerms: string[] }> = [
+  {
+    triggers: ["software", "programmer", "developer", "web", "mobile"],
+    courseTerms: ["software", "programming", "computer science", "computing", "information technology", "web", "mobile", "application development"],
+  },
+  {
+    triggers: ["security", "cyber"],
+    courseTerms: ["cyber", "security", "information security", "network security", "computing", "information technology"],
+  },
+  {
+    triggers: ["database", "data"],
+    courseTerms: ["database", "data science", "data analytics", "analytics", "information technology", "computing"],
+  },
+  {
+    triggers: ["network", "cloud", "devops", "systems administrator", "systems architect"],
+    courseTerms: ["network", "cloud", "devops", "systems", "infrastructure", "information technology", "computing"],
+  },
+  {
+    triggers: ["business analyst", "systems analyst", "business and systems analyst"],
+    courseTerms: ["business analytics", "business information systems", "information systems", "information technology", "business analysis", "analytics"],
+  },
+  {
+    triggers: ["project manager", "contract manager", "manager", "consultant"],
+    courseTerms: ["project management", "information systems", "information technology", "management", "business", "enterprise"],
+  },
+];
+
+function inferredCareerScore(occupation: string, ...courseValues: Array<string | null | undefined>) {
+  if (!occupation.trim()) return 70;
+  const direct = textScore(occupation, ...courseValues);
+  const occupationText = occupation.toLowerCase();
+  const haystack = courseValues.filter(Boolean).join(" ").toLowerCase();
+  let domainScore = 45;
+
+  for (const domain of careerDomains) {
+    if (!domain.triggers.some((trigger) => occupationText.includes(trigger))) continue;
+    const matches = domain.courseTerms.filter((term) => haystack.includes(term)).length;
+    if (matches > 0) domainScore = Math.max(domainScore, clamp(68 + matches * 7));
+  }
+
+  return Math.max(direct, domainScore);
+}
+
 function affordabilityScore(totalFee: number | null, annualFee: number | null, fullBudget: number, semesterBudget: number) {
   const effectiveAnnual = annualFee ?? (totalFee ? totalFee / 2 : null);
   if (!effectiveAnnual && !totalFee) return 60;
@@ -124,11 +167,11 @@ export async function GET(request: NextRequest) {
       .map((course) => {
         const studyField = course.study_field_id ? fieldMap.get(course.study_field_id) ?? null : null;
         const academic = textScore(study || field, studyField, course.name, course.qualification_level);
-        const career = textScore(occupation, course.name, studyField, course.qualification_level);
+        const career = inferredCareerScore(occupation, course.name, studyField, course.qualification_level);
         const { totalFee, annualFee } = courseFees(course);
         const affordability = affordabilityScore(totalFee, annualFee, fullBudget, semesterBudget);
         const studyPreference = textScore(study, course.name, studyField);
-        const preliminaryScore = clamp(academic * 0.34 + career * 0.34 + affordability * 0.22 + studyPreference * 0.10);
+        const preliminaryScore = clamp(academic * 0.32 + career * 0.38 + affordability * 0.20 + studyPreference * 0.10);
         return { course, studyField, academic, career, affordability, preliminaryScore, totalFee, annualFee };
       })
       .sort((a, b) => b.preliminaryScore - a.preliminaryScore)
@@ -201,9 +244,10 @@ export async function GET(request: NextRequest) {
 
       const linkedOccupationRows = occupationsByCourse.get(course.id) ?? [];
       const occupationNames = linkedOccupationRows.map((item) => occupationMap.get(item.id)).filter(Boolean) as string[];
-      const career = occupationNames.length
-        ? Math.max(base.career, ...occupationNames.map((name) => textScore(occupation, name)))
-        : base.career;
+      const explicitCareerScores = occupationNames.map((name) => textScore(occupation, name));
+      const bestExplicitCareerScore = explicitCareerScores.length ? Math.max(...explicitCareerScores) : null;
+      const career = bestExplicitCareerScore == null ? base.career : Math.max(base.career, bestExplicitCareerScore);
+      const careerMatchSource = bestExplicitCareerScore != null && bestExplicitCareerScore >= base.career ? "explicit_mapping" : "inferred_text";
 
       const scholarshipIdsForCourse = scholarshipsByCourse.get(course.id) ?? [];
       const linkedScholarships = scholarshipIdsForCourse.map((id) => scholarshipMap.get(id)).filter(Boolean);
@@ -218,7 +262,7 @@ export async function GET(request: NextRequest) {
           : 0;
       const migration = migrationByCourse.get(course.id) ?? 45;
       const migrationWeight = migrationImportance === "high" ? 0.2 : migrationImportance === "consider" ? 0.1 : 0;
-      const baseOverall = base.academic * 0.28 + career * 0.3 + base.affordability * 0.22 + bestCampus.score * 0.2;
+      const baseOverall = base.academic * 0.26 + career * 0.34 + base.affordability * 0.20 + bestCampus.score * 0.20;
       const overall = clamp(baseOverall * (1 - migrationWeight) + migration * migrationWeight + scholarshipBoost);
       const living = livingMap.get(bestCampus.campus.id) ?? null;
 
@@ -256,6 +300,10 @@ export async function GET(request: NextRequest) {
           monthlyEstimate: Number(living.monthly_estimate),
           status: living.verification_status,
         } : null,
+        careerMatch: {
+          source: careerMatchSource,
+          linkedOccupations: occupationNames,
+        },
         scores: {
           academic: base.academic,
           career,
@@ -266,7 +314,8 @@ export async function GET(request: NextRequest) {
         },
         reasons: [
           base.academic >= 80 ? "Strong study-field match." : null,
-          career >= 80 ? "Strong career-direction match from available occupation/course evidence." : null,
+          career >= 80 && careerMatchSource === "explicit_mapping" ? "Strong career match from an explicit course-to-career mapping." : null,
+          career >= 80 && careerMatchSource === "inferred_text" ? "Strong career relevance inferred from the course name and study field; no explicit course-to-career mapping is required for this heuristic." : null,
           base.affordability >= 80 ? "Tuition is within or close to the stated budget using available fee data." : null,
           bestCampus.score >= 85 ? "Campus matches the selected location preferences." : null,
           bestScholarship ? "A verified scholarship record is linked to this course." : null,
@@ -282,6 +331,7 @@ export async function GET(request: NextRequest) {
       totalCandidates: allCourses.length,
       enrichedCandidates: courses.length,
       source: "SUPABASE_FULL_CATALOGUE",
+      careerMatching: "explicit_mappings_plus_inferred_course_text",
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
