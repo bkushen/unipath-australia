@@ -136,7 +136,7 @@ export default async function CareerDetailPage({ params }: { params: Promise<{ c
                 const campus = course.campuses[0];
                 const logoUrl = ensureUrl(university?.logo_url);
                 const officialUrl = ensureUrl(course.official_course_url) || ensureUrl(university?.website);
-                const initials = (university?.name ?? "University").split(/\s+/).filter(Boolean).slice(0, 3).map((word) => word[0]).join("").toUpperCase();
+                const initials = (university?.name ?? "University").split(/\s+/).filter(Boolean).slice(0, 3).map((word: string) => word[0]).join("").toUpperCase();
                 return (
                   <article key={course.id} style={courseCardStyle}>
                     <div style={courseTopStyle}>
