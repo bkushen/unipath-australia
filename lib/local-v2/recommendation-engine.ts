@@ -34,12 +34,35 @@ function getCampus(course: DemoCourse): DemoCampus {
   return campus;
 }
 
-function affordabilityScore(profile: StudentDecisionProfile, course: DemoCourse): number {
-  if (profile.annualTuitionBudgetCents <= 0) return 50;
-  const ratio = course.annualTuitionCents / profile.annualTuitionBudgetCents;
+function ratioScore(cost: number, budget: number): number {
+  if (budget <= 0) return 50;
+  const ratio = cost / budget;
   if (ratio <= 0.8) return 100;
   if (ratio <= 1) return clamp(100 - (ratio - 0.8) * 100);
   return clamp(80 - (ratio - 1) * 120);
+}
+
+function affordabilityScore(profile: StudentDecisionProfile, course: DemoCourse): number {
+  const semesterCost = Math.round(course.annualTuitionCents / 2);
+  const grossFullCourseCost = Math.round(course.annualTuitionCents * course.durationYears);
+  const scholarshipPercent = course.scholarshipPercent ?? 0;
+  const scholarshipMultiplier = 1 - scholarshipPercent / 100;
+  const netSemesterCost = Math.round(semesterCost * scholarshipMultiplier);
+  const netFullCourseCost = Math.round(grossFullCourseCost * scholarshipMultiplier);
+
+  const semesterBudget = profile.semesterTuitionBudgetCents ?? Math.round(profile.annualTuitionBudgetCents / 2);
+  const fullCourseBudget = profile.fullCourseBudgetCents ?? Math.round(profile.annualTuitionBudgetCents * course.durationYears);
+
+  const semesterScore = ratioScore(netSemesterCost, semesterBudget);
+  const fullCourseScore = ratioScore(netFullCourseCost, fullCourseBudget);
+
+  let scholarshipScore = 70;
+  const importance = profile.scholarshipImportance ?? "prefer";
+  if (importance === "high") scholarshipScore = scholarshipPercent > 0 ? clamp(70 + scholarshipPercent * 2.5) : 30;
+  if (importance === "prefer") scholarshipScore = scholarshipPercent > 0 ? clamp(75 + scholarshipPercent * 1.5) : 60;
+  if (importance === "none") scholarshipScore = 75;
+
+  return clamp(semesterScore * 0.42 + fullCourseScore * 0.43 + scholarshipScore * 0.15);
 }
 
 function locationScore(profile: StudentDecisionProfile, campus: DemoCampus): number {
@@ -88,6 +111,14 @@ export function rankCourses(profile: StudentDecisionProfile): RankedCourseRecomm
     .map((course) => {
       const university = getUniversity(course);
       const campus = getCampus(course);
+      const scholarshipPercent = course.scholarshipPercent ?? 0;
+      const grossSemester = Math.round(course.annualTuitionCents / 2);
+      const grossFullCourse = Math.round(course.annualTuitionCents * course.durationYears);
+      const netSemester = Math.round(grossSemester * (1 - scholarshipPercent / 100));
+      const netFullCourse = Math.round(grossFullCourse * (1 - scholarshipPercent / 100));
+      const semesterBudget = profile.semesterTuitionBudgetCents ?? Math.round(profile.annualTuitionBudgetCents / 2);
+      const fullCourseBudget = profile.fullCourseBudgetCents ?? Math.round(profile.annualTuitionBudgetCents * course.durationYears);
+
       const scoresWithoutOverall = {
         academic: academicScore(profile, course),
         career: careerScore(profile, course),
@@ -101,7 +132,11 @@ export function rankCourses(profile: StudentDecisionProfile): RankedCourseRecomm
       const cautions: string[] = [];
 
       if (scoresWithoutOverall.career >= 85) reasons.push("Strong match to the selected career goal.");
-      if (scoresWithoutOverall.affordability >= 80) reasons.push("Annual tuition is within or close to the stated budget.");
+      if (netSemester <= semesterBudget) reasons.push("Estimated semester tuition is within the stated semester budget.");
+      if (netFullCourse <= fullCourseBudget) reasons.push("Estimated total tuition is within the stated full-course budget.");
+      if ((profile.scholarshipImportance === "high" || profile.scholarshipImportance === "prefer") && scholarshipPercent > 0) {
+        reasons.push(`Demo scholarship of ${scholarshipPercent}% improves affordability.`);
+      }
       if (profile.preferredStates.includes(campus.state)) reasons.push(`Campus is in preferred state ${campus.state}.`);
       if (campus.regional && profile.regionalAccepted) reasons.push("Regional campus preference is supported.");
       if (scoresWithoutOverall.labourMarket >= 85) reasons.push("Demo labour-market indicator is strong.");
@@ -109,9 +144,11 @@ export function rankCourses(profile: StudentDecisionProfile): RankedCourseRecomm
         reasons.push("Demo migration-pathway alignment is comparatively strong.");
       }
 
-      if (course.annualTuitionCents > profile.annualTuitionBudgetCents) cautions.push("Annual tuition exceeds the stated tuition budget.");
+      if (netSemester > semesterBudget) cautions.push("Estimated semester tuition exceeds the stated semester budget.");
+      if (netFullCourse > fullCourseBudget) cautions.push("Estimated full-course tuition exceeds the stated total course budget.");
+      if (profile.scholarshipImportance === "high" && scholarshipPercent <= 0) cautions.push("No demo scholarship is attached to this course.");
       if (profile.preferredStates.length > 0 && !profile.preferredStates.includes(campus.state)) cautions.push("Campus is outside the preferred state list.");
-      cautions.push("All migration and labour-market values in this local build are DEMO data, not migration advice.");
+      cautions.push("Scholarship, migration and labour-market values in this local build are DEMO data only.");
 
       return {
         course,
