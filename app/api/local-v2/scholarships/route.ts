@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
+const IN_CHUNK_SIZE = 150;
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -9,6 +11,12 @@ function getSupabase() {
 }
 
 const ensureUrl = (value: string | null | undefined) => !value ? null : /^https?:\/\//i.test(value) ? value : `https://${value}`;
+
+function chunks<T>(items: T[], size = IN_CHUNK_SIZE) {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
+}
 
 export async function GET(request: NextRequest) {
   const q = (request.nextUrl.searchParams.get("q") ?? "").trim().slice(0, 100);
@@ -30,27 +38,41 @@ export async function GET(request: NextRequest) {
     const universityIds = Array.from(new Set((scholarships ?? []).map((item) => item.university_id).filter(Boolean)));
     const scholarshipIds = (scholarships ?? []).map((item) => item.id);
 
-    const [{ data: universities, error: universityError }, { data: links, error: linkError }] = await Promise.all([
+    const [{ data: universities, error: universityError }, linkResponses] = await Promise.all([
       universityIds.length
         ? supabase.from("universities").select("id,name,slug,website,logo_url").in("id", universityIds)
         : Promise.resolve({ data: [], error: null }),
       scholarshipIds.length
-        ? supabase.from("course_scholarships").select("scholarship_id,course_id").in("scholarship_id", scholarshipIds)
-        : Promise.resolve({ data: [], error: null }),
+        ? Promise.all(chunks(scholarshipIds).map((ids) => supabase.from("course_scholarships").select("scholarship_id,course_id").in("scholarship_id", ids)))
+        : Promise.resolve([]),
     ]);
     if (universityError) throw universityError;
-    if (linkError) throw linkError;
 
-    const courseIds = Array.from(new Set((links ?? []).map((item) => item.course_id).filter(Boolean)));
-    const { data: courses, error: courseError } = courseIds.length
-      ? await supabase.from("courses").select("id,name,qualification_level,annual_fee,total_fee,currency,duration_months,official_course_url,cricos_expired").in("id", courseIds).or("cricos_expired.is.null,cricos_expired.eq.false")
-      : { data: [], error: null };
-    if (courseError) throw courseError;
+    const links = linkResponses.flatMap((response) => {
+      if (response.error) throw response.error;
+      return response.data ?? [];
+    });
+
+    const courseIds = Array.from(new Set(links.map((item) => item.course_id).filter(Boolean)));
+    const courseResponses = courseIds.length
+      ? await Promise.all(chunks(courseIds).map((ids) =>
+          supabase
+            .from("courses")
+            .select("id,name,qualification_level,annual_fee,total_fee,currency,duration_months,official_course_url,cricos_expired")
+            .in("id", ids)
+            .or("cricos_expired.is.null,cricos_expired.eq.false"),
+        ))
+      : [];
+
+    const courses = courseResponses.flatMap((response) => {
+      if (response.error) throw response.error;
+      return response.data ?? [];
+    });
 
     const universityMap = new Map((universities ?? []).map((item) => [item.id, item]));
-    const courseMap = new Map((courses ?? []).map((item) => [item.id, item]));
+    const courseMap = new Map(courses.map((item) => [item.id, item]));
     const courseIdsByScholarship = new Map<string, string[]>();
-    for (const link of links ?? []) {
+    for (const link of links) {
       const current = courseIdsByScholarship.get(link.scholarship_id) ?? [];
       current.push(link.course_id);
       courseIdsByScholarship.set(link.scholarship_id, current);
