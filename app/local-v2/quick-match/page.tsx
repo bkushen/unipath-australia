@@ -105,64 +105,121 @@ export default function QuickMatchPage() {
   };
 
   return (
-    <main style={{ maxWidth: 980, margin: "0 auto", padding: "32px 18px 70px" }}>
-      <div style={{ marginBottom: 22 }}>
-        <span style={demoBadgeStyle}>LOCAL DEMO COURSE DATA · LIVE FX</span>
-        <h1 style={{ marginBottom: 8 }}>UniPath Quick → Detailed → PR Pathway Flow</h1>
-        <p style={{ color: "#586174", maxWidth: 800 }}>
-          Course and migration values are still local demo data. Budget inputs can now be entered in your own currency and are converted to AUD using the latest available daily exchange rate.
-        </p>
-        <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "#eef6ff", border: "1px solid #cfe3ff" }}>
-          <strong>Profile persistence:</strong> {restoredProfile ? "Your previous local profile was restored automatically." : "Your answers are saved automatically in this browser."}
-          <button type="button" onClick={resetSavedProfile} style={{ marginLeft: 12, border: "1px solid #b8c7db", background: "#fff", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>Clear saved profile</button>
+    <main style={pageStyle}>
+      <header style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
+          <span style={demoBadgeStyle}>Demo version · live currency conversion</span>
+          <button type="button" onClick={resetSavedProfile} style={tinyButtonStyle}>Clear saved answers</button>
         </div>
-      </div>
+        <h1 style={{ margin: "18px 0 8px", fontSize: 38, lineHeight: 1.12 }}>Find your best course in Australia</h1>
+        <p style={{ color: "#586174", maxWidth: 760, fontSize: 17, lineHeight: 1.55, margin: 0 }}>
+          Answer a few quick questions to get personalised course, university and state recommendations.
+        </p>
+        <div style={saveNoticeStyle}>✓ {restoredProfile ? "Your previous answers were restored." : "Your answers are saved automatically in this browser."}</div>
+      </header>
 
       {stage === "quick-input" && (
         <section style={sectionStyle}>
-          <div style={stepStyle}>STEP 1 · QUICK MATCH</div>
-          <h2>Tell us the essentials</h2>
-          <div style={formGridStyle}>
-            <label style={labelStyle}>Highest qualification
-              <select value={profile.highestQualification} onChange={(e) => setProfile({ ...profile, highestQualification: e.target.value })} style={inputStyle}>
-                <option>Bachelor</option><option>Diploma</option><option>Master</option><option>High School</option>
-              </select>
-            </label>
-            <label style={labelStyle}>Study field
-              <select value={profile.qualificationField} onChange={(e) => setProfile({ ...profile, qualificationField: e.target.value })} style={inputStyle}>
-                <option>Information Technology</option><option>Engineering</option><option>Business</option><option>Health</option>
-              </select>
-            </label>
-            <label style={labelStyle}>Career goal
-              <select value={profile.desiredOccupation} onChange={(e) => setProfile({ ...profile, desiredOccupation: e.target.value })} style={inputStyle}>
-                <option>Software Engineer</option><option>Software Developer</option><option>Data Scientist</option><option>Cyber Security Analyst</option><option>ICT Business Analyst</option>
-              </select>
-            </label>
-            <CurrencyBudgetInput
-              label="Annual tuition budget"
-              audCents={profile.annualTuitionBudgetCents}
-              onAudCentsChange={(annualTuitionBudgetCents) => setProfile((current) => ({ ...current, annualTuitionBudgetCents }))}
-            />
+          <div style={progressWrapStyle}>
+            <div style={{ fontWeight: 800 }}>Step 1 of 4</div>
+            <div style={progressTrackStyle}><div style={{ ...progressFillStyle, width: "25%" }} /></div>
           </div>
 
-          <fieldset style={fieldsetStyle}>
-            <legend style={{ fontWeight: 700 }}>Preferred state(s)</legend>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-              {states.map((state) => (
-                <label key={state} style={checkStyle}>
-                  <input type="checkbox" checked={profile.preferredStates.includes(state)} onChange={() => updateState(state)} /> {state}
-                </label>
-              ))}
+          <div style={{ marginBottom: 24 }}>
+            <h2 style={{ margin: "0 0 6px", fontSize: 27 }}>Quick Match</h2>
+            <p style={mutedStyle}>Start with the essentials. You can add more details later for a more precise result.</p>
+          </div>
+
+          <div style={subsectionStyle}>
+            <div style={subsectionHeaderStyle}>
+              <span style={subsectionIconStyle}>1</span>
+              <div><strong>Study goal</strong><div style={helperStyle}>Tell us where you are now and where you want to go.</div></div>
             </div>
-          </fieldset>
-
-          <label style={{ ...checkStyle, marginTop: 16 }}>
-            <input type="checkbox" checked={profile.regionalAccepted} onChange={(e) => setProfile({ ...profile, regionalAccepted: e.target.checked })} /> I am open to regional study locations
-          </label>
-
-          <div style={{ marginTop: 22 }}>
-            <button type="button" onClick={() => { setProfile((current) => ({ ...current, mode: "quick", migrationImportance: "none" })); setResultSource("quick"); setStage("quick-result"); }} style={primaryButtonStyle}>Get Quick Result</button>
+            <div style={formGridStyle}>
+              <label style={labelStyle}>Highest qualification
+                <select value={profile.highestQualification} onChange={(e) => setProfile({ ...profile, highestQualification: e.target.value })} style={inputStyle}>
+                  <option>Bachelor</option><option>Diploma</option><option>Master</option><option>High School</option>
+                </select>
+              </label>
+              <label style={labelStyle}>Study field
+                <select value={profile.qualificationField} onChange={(e) => setProfile({ ...profile, qualificationField: e.target.value })} style={inputStyle}>
+                  <option>Information Technology</option><option>Engineering</option><option>Business</option><option>Health</option>
+                </select>
+              </label>
+              <label style={labelStyle}>Career goal
+                <select value={profile.desiredOccupation} onChange={(e) => setProfile({ ...profile, desiredOccupation: e.target.value })} style={inputStyle}>
+                  <option>Software Engineer</option><option>Software Developer</option><option>Data Scientist</option><option>Cyber Security Analyst</option><option>ICT Business Analyst</option>
+                </select>
+              </label>
+            </div>
           </div>
+
+          <div style={subsectionStyle}>
+            <div style={subsectionHeaderStyle}>
+              <span style={subsectionIconStyle}>2</span>
+              <div><strong>Budget</strong><div style={helperStyle}>Enter your budget in LKR or another currency. We convert it to AUD automatically.</div></div>
+            </div>
+            <div style={{ maxWidth: 520 }}>
+              <CurrencyBudgetInput
+                label="Annual tuition budget"
+                audCents={profile.annualTuitionBudgetCents}
+                onAudCentsChange={(annualTuitionBudgetCents) => setProfile((current) => ({ ...current, annualTuitionBudgetCents }))}
+              />
+            </div>
+          </div>
+
+          <div style={{ ...subsectionStyle, marginBottom: 0 }}>
+            <div style={subsectionHeaderStyle}>
+              <span style={subsectionIconStyle}>3</span>
+              <div><strong>Location preferences</strong><div style={helperStyle}>Choose one or more states. You can leave this flexible.</div></div>
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontWeight: 700, marginBottom: 10 }}>Preferred state(s)</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 9 }}>
+                {states.map((state) => {
+                  const selected = profile.preferredStates.includes(state);
+                  return (
+                    <button
+                      key={state}
+                      type="button"
+                      onClick={() => updateState(state)}
+                      aria-pressed={selected}
+                      style={{ ...statePillStyle, ...(selected ? selectedStatePillStyle : {}) }}
+                    >
+                      {selected ? "✓ " : ""}{state}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontWeight: 700, marginBottom: 10 }}>Open to regional study?</div>
+              <div style={{ display: "flex", gap: 9 }}>
+                <button type="button" onClick={() => setProfile({ ...profile, regionalAccepted: true })} style={{ ...choicePillStyle, ...(profile.regionalAccepted ? selectedChoicePillStyle : {}) }}>Yes</button>
+                <button type="button" onClick={() => setProfile({ ...profile, regionalAccepted: false })} style={{ ...choicePillStyle, ...(!profile.regionalAccepted ? selectedChoicePillStyle : {}) }}>No</button>
+              </div>
+            </div>
+          </div>
+
+          <div style={benefitBoxStyle}>
+            <strong>What you’ll get</strong>
+            <div style={benefitGridStyle}>
+              <span>✓ Top course matches</span>
+              <span>✓ Recommended universities</span>
+              <span>✓ Best-fit states</span>
+              <span>✓ Budget suitability</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => { setProfile((current) => ({ ...current, mode: "quick", migrationImportance: "none" })); setResultSource("quick"); setStage("quick-result"); }}
+            style={ctaButtonStyle}
+          >
+            Show My Quick Result →
+          </button>
         </section>
       )}
 
@@ -174,11 +231,11 @@ export default function QuickMatchPage() {
             <ResultCards />
           </section>
           <section style={{ ...sectionStyle, marginTop: 16 }}>
-            <h2>Do you want a more detailed result?</h2>
-            <p>We will keep your Quick Match answers and ask about experience, skills, total funds, dependants and transport preferences.</p>
+            <h2>Want a more detailed result?</h2>
+            <p>We’ll keep your answers and only ask for the extra details needed to improve your recommendation.</p>
             <div style={buttonRowStyle}>
               <button type="button" onClick={() => setStage("detailed-input")} style={primaryButtonStyle}>Yes, improve my result</button>
-              <button type="button" onClick={() => setResultSource("quick")} style={secondaryButtonStyle}>No, keep Quick Result</button>
+              <button type="button" onClick={() => setResultSource("quick")} style={secondaryButtonStyle}>Keep Quick Result</button>
             </div>
           </section>
           <MigrationPrompt onContinue={() => setStage("migration-result")} migrationChoice={migrationChoice} setMigrationChoice={setMigrationChoice} source="Quick Result" />
@@ -199,7 +256,7 @@ export default function QuickMatchPage() {
             <label style={labelStyle}>Years of relevant experience
               <input type="number" min={0} max={40} step={0.5} value={profile.yearsExperience ?? 0} onChange={(e) => setProfile({ ...profile, yearsExperience: Number(e.target.value) })} style={inputStyle} />
             </label>
-            <label style={labelStyle}>Skills (comma separated)
+            <label style={labelStyle}>Skills
               <input value={(profile.skills ?? []).join(", ")} onChange={(e) => setProfile({ ...profile, skills: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })} style={inputStyle} placeholder="software, web, databases" />
             </label>
             <label style={labelStyle}>Dependants
@@ -254,8 +311,8 @@ function MigrationPrompt({ onContinue, migrationChoice, setMigrationChoice, sour
   return (
     <section style={{ ...sectionStyle, marginTop: 16 }}>
       <div style={stepStyle}>OPTIONAL · PR / MIGRATION PATHWAY</div>
-      <h2>Do you want UniPath to consider potential PR / migration pathways after the course?</h2>
-      <p>This question appears after the {source}. If enabled, UniPath creates a separate migration-aware result using the same student profile.</p>
+      <h2>Would you like UniPath to consider potential PR / migration pathways?</h2>
+      <p>We’ll keep your {source} unchanged and create a separate migration-aware comparison.</p>
       <div style={formGridStyle}>
         <label style={labelStyle}>How important is this to you?
           <select value={migrationChoice} onChange={(e) => setMigrationChoice(e.target.value as MigrationImportance)} style={inputStyle}>
@@ -268,17 +325,33 @@ function MigrationPrompt({ onContinue, migrationChoice, setMigrationChoice, sour
   );
 }
 
-const sectionStyle = { border: "1px solid #dfe3ea", borderRadius: 18, background: "#fff", padding: 22 } as const;
+const pageStyle = { maxWidth: 1000, margin: "0 auto", padding: "34px 18px 70px", background: "#f7f9fc", minHeight: "100vh" } as const;
+const sectionStyle = { border: "1px solid #dfe3ea", borderRadius: 22, background: "#fff", padding: 24, boxShadow: "0 8px 30px rgba(16,24,40,0.05)" } as const;
+const subsectionStyle = { borderTop: "1px solid #eef1f5", paddingTop: 22, marginBottom: 24 } as const;
+const subsectionHeaderStyle = { display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 16 } as const;
+const subsectionIconStyle = { display: "grid", placeItems: "center", width: 28, height: 28, borderRadius: 999, background: "#111827", color: "#fff", fontWeight: 800, flex: "0 0 auto" } as const;
+const formGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 14 } as const;
+const labelStyle = { display: "grid", gap: 7, fontWeight: 700 } as const;
+const inputStyle = { width: "100%", border: "1px solid #cfd5df", borderRadius: 12, padding: "12px 12px", fontSize: 15, background: "#fff" } as const;
+const statePillStyle = { border: "1px solid #cfd5df", background: "#fff", color: "#344054", borderRadius: 999, padding: "10px 15px", fontWeight: 750, cursor: "pointer" } as const;
+const selectedStatePillStyle = { background: "#111827", color: "#fff", borderColor: "#111827" } as const;
+const choicePillStyle = { border: "1px solid #cfd5df", background: "#fff", borderRadius: 10, padding: "10px 18px", fontWeight: 750, cursor: "pointer" } as const;
+const selectedChoicePillStyle = { background: "#eef4ff", borderColor: "#84adff", color: "#194185" } as const;
+const benefitBoxStyle = { marginTop: 24, padding: 18, borderRadius: 16, background: "#f8fafc", border: "1px solid #e4e7ec" } as const;
+const benefitGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8, marginTop: 10, color: "#475467" } as const;
+const ctaButtonStyle = { width: "100%", marginTop: 20, border: 0, borderRadius: 13, background: "#111827", color: "#fff", padding: "15px 18px", fontSize: 17, fontWeight: 800, cursor: "pointer" } as const;
+const progressWrapStyle = { display: "grid", gridTemplateColumns: "auto minmax(120px, 1fr)", gap: 14, alignItems: "center", marginBottom: 22, color: "#475467" } as const;
+const progressTrackStyle = { height: 8, borderRadius: 999, background: "#eef1f5", overflow: "hidden" } as const;
+const progressFillStyle = { height: "100%", borderRadius: 999, background: "#111827" } as const;
+const saveNoticeStyle = { display: "inline-block", marginTop: 14, padding: "8px 11px", borderRadius: 10, background: "#ecfdf3", color: "#027a48", fontSize: 13, fontWeight: 700 } as const;
+const tinyButtonStyle = { border: "1px solid #d0d5dd", background: "#fff", borderRadius: 9, padding: "7px 10px", cursor: "pointer", color: "#475467" } as const;
+const mutedStyle = { color: "#667085", margin: 0, lineHeight: 1.55 } as const;
+const helperStyle = { color: "#667085", fontSize: 13, marginTop: 3, fontWeight: 500 } as const;
 const cardStyle = { border: "1px solid #e2e6ed", borderRadius: 14, padding: 16, background: "#fbfcfe" } as const;
-const formGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 } as const;
-const labelStyle = { display: "grid", gap: 7, fontWeight: 650 } as const;
-const inputStyle = { width: "100%", border: "1px solid #cfd5df", borderRadius: 10, padding: "10px 11px", fontSize: 15, background: "#fff" } as const;
-const fieldsetStyle = { border: "1px solid #dfe3ea", borderRadius: 12, padding: 14, marginTop: 16 } as const;
-const checkStyle = { display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600 } as const;
 const buttonRowStyle = { display: "flex", flexWrap: "wrap", gap: 10, marginTop: 20 } as const;
 const primaryButtonStyle = { border: 0, borderRadius: 10, background: "#111827", color: "#fff", padding: "11px 16px", fontWeight: 750, cursor: "pointer" } as const;
 const secondaryButtonStyle = { border: "1px solid #cfd5df", borderRadius: 10, background: "#fff", color: "#111827", padding: "11px 16px", fontWeight: 750, cursor: "pointer" } as const;
-const demoBadgeStyle = { display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff2cc", fontWeight: 750 } as const;
+const demoBadgeStyle = { display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff2cc", fontWeight: 750, fontSize: 13 } as const;
 const stepStyle = { color: "#475467", fontSize: 13, fontWeight: 800, letterSpacing: 0.5 } as const;
 const rankStyle = { color: "#344054", fontSize: 13, fontWeight: 800 } as const;
 const scoreGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, margin: "14px 0" } as const;
