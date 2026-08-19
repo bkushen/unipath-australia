@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-const DEFAULT_LIMIT = 60;
-const MAX_LIMIT = 100;
+const DEFAULT_PAGE_SIZE = 100;
+const MAX_PAGE_SIZE = 100;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -22,16 +22,19 @@ const ensureUrl = (value: string | null | undefined) => {
 
 export async function GET(request: NextRequest) {
   const q = clean(request.nextUrl.searchParams.get("q"));
-  const limit = Math.min(Math.max(Number(request.nextUrl.searchParams.get("limit")) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+  const page = Math.max(Number(request.nextUrl.searchParams.get("page")) || 1, 1);
+  const pageSize = Math.min(Math.max(Number(request.nextUrl.searchParams.get("pageSize")) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
   const supabase = getSupabase();
 
   try {
     let courseQuery = supabase
       .from("courses")
-      .select("id,university_id,study_field_id,name,slug,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,description,official_course_url,official_course_url_verified_at,source_url,verified_at,verification_status,delivery_mode,cricos_expired")
+      .select("id,university_id,study_field_id,name,slug,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,description,official_course_url,official_course_url_verified_at,source_url,verified_at,verification_status,delivery_mode,cricos_expired", { count: "exact" })
       .or("cricos_expired.is.null,cricos_expired.eq.false")
       .order("name")
-      .limit(limit);
+      .range(from, to);
 
     if (q) {
       courseQuery = courseQuery.or(
@@ -39,7 +42,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { data: courses, error: courseError } = await courseQuery;
+    const { data: courses, error: courseError, count } = await courseQuery;
     if (courseError) throw courseError;
 
     const universityIds = Array.from(new Set((courses ?? []).map((course) => course.university_id).filter(Boolean)));
@@ -75,7 +78,7 @@ export async function GET(request: NextRequest) {
     const results = (courses ?? []).map((course) => {
       const university = universityMap.get(course.university_id);
       const courseCampusIds = campusIdsByCourse.get(course.id) ?? [];
-      const courseCampusesResolved = courseCampusIds.map((id) => campusMap.get(id)).filter(Boolean);
+      const resolvedCampuses = courseCampusIds.map((id) => campusMap.get(id)).filter(Boolean);
       return {
         id: course.id,
         name: course.name,
@@ -93,17 +96,15 @@ export async function GET(request: NextRequest) {
         officialCourseUrl: ensureUrl(course.official_course_url),
         officialCourseUrlVerifiedAt: course.official_course_url_verified_at,
         sourceUrl: ensureUrl(course.source_url),
-        university: university
-          ? {
-              id: university.id,
-              name: university.name,
-              slug: university.slug,
-              website: ensureUrl(university.website),
-              logoUrl: ensureUrl(university.logo_url),
-              cricosCode: university.cricos_code,
-            }
-          : null,
-        campuses: courseCampusesResolved.map((campus) => ({
+        university: university ? {
+          id: university.id,
+          name: university.name,
+          slug: university.slug,
+          website: ensureUrl(university.website),
+          logoUrl: ensureUrl(university.logo_url),
+          cricosCode: university.cricos_code,
+        } : null,
+        campuses: resolvedCampuses.map((campus) => ({
           id: campus!.id,
           name: campus!.name,
           city: campus!.city,
@@ -114,7 +115,19 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json({ courses: results, count: results.length, source: "SUPABASE" });
+    const total = count ?? 0;
+    const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+    return NextResponse.json({
+      courses: results,
+      count: results.length,
+      total,
+      page,
+      pageSize,
+      totalPages,
+      hasPreviousPage: page > 1,
+      hasNextPage: page < totalPages,
+      source: "SUPABASE",
+    });
   } catch (error) {
     const detail = typeof error === "object" && error && "message" in error ? String((error as { message?: unknown }).message) : String(error);
     console.error("Course catalogue search failed", detail);
