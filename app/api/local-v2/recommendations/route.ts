@@ -30,30 +30,12 @@ function textScore(query: string, ...values: Array<string | null | undefined>) {
 }
 
 const careerDomains: Array<{ triggers: string[]; courseTerms: string[] }> = [
-  {
-    triggers: ["software", "programmer", "developer", "web", "mobile"],
-    courseTerms: ["software", "programming", "computer science", "computing", "information technology", "web", "mobile", "application development"],
-  },
-  {
-    triggers: ["security", "cyber"],
-    courseTerms: ["cyber", "security", "information security", "network security", "computing", "information technology"],
-  },
-  {
-    triggers: ["database", "data"],
-    courseTerms: ["database", "data science", "data analytics", "analytics", "information technology", "computing"],
-  },
-  {
-    triggers: ["network", "cloud", "devops", "systems administrator", "systems architect"],
-    courseTerms: ["network", "cloud", "devops", "systems", "infrastructure", "information technology", "computing"],
-  },
-  {
-    triggers: ["business analyst", "systems analyst", "business and systems analyst"],
-    courseTerms: ["business analytics", "business information systems", "information systems", "information technology", "business analysis", "analytics"],
-  },
-  {
-    triggers: ["project manager", "contract manager", "manager", "consultant"],
-    courseTerms: ["project management", "information systems", "information technology", "management", "business", "enterprise"],
-  },
+  { triggers: ["software", "programmer", "developer", "web", "mobile"], courseTerms: ["software", "programming", "computer science", "computing", "information technology", "web", "mobile", "application development"] },
+  { triggers: ["security", "cyber"], courseTerms: ["cyber", "security", "information security", "network security", "computing", "information technology"] },
+  { triggers: ["database", "data"], courseTerms: ["database", "data science", "data analytics", "analytics", "information technology", "computing"] },
+  { triggers: ["network", "cloud", "devops", "systems administrator", "systems architect"], courseTerms: ["network", "cloud", "devops", "systems", "infrastructure", "information technology", "computing"] },
+  { triggers: ["business analyst", "systems analyst", "business and systems analyst"], courseTerms: ["business analytics", "business information systems", "information systems", "information technology", "business analysis", "analytics"] },
+  { triggers: ["project manager", "contract manager", "manager", "consultant"], courseTerms: ["project management", "information systems", "information technology", "management", "business", "enterprise"] },
 ];
 
 function inferredCareerScore(occupation: string, ...courseValues: Array<string | null | undefined>) {
@@ -62,19 +44,17 @@ function inferredCareerScore(occupation: string, ...courseValues: Array<string |
   const occupationText = occupation.toLowerCase();
   const haystack = courseValues.filter(Boolean).join(" ").toLowerCase();
   let domainScore = 45;
-
   for (const domain of careerDomains) {
     if (!domain.triggers.some((trigger) => occupationText.includes(trigger))) continue;
     const matches = domain.courseTerms.filter((term) => haystack.includes(term)).length;
     if (matches > 0) domainScore = Math.max(domainScore, clamp(68 + matches * 7));
   }
-
   return Math.max(direct, domainScore);
 }
 
 function affordabilityScore(totalFee: number | null, annualFee: number | null, fullBudget: number, semesterBudget: number) {
+  if (!annualFee && !totalFee) return 60;
   const effectiveAnnual = annualFee ?? (totalFee ? totalFee / 2 : null);
-  if (!effectiveAnnual && !totalFee) return 60;
   const semester = effectiveAnnual ? effectiveAnnual / 2 : null;
   const ratio = (cost: number | null, budget: number) => {
     if (!cost || budget <= 0) return 60;
@@ -86,27 +66,100 @@ function affordabilityScore(totalFee: number | null, annualFee: number | null, f
   return clamp(ratio(semester, semesterBudget) * 0.45 + ratio(totalFee, fullBudget) * 0.55);
 }
 
-function courseFees(course: {
-  annual_fee: unknown;
-  total_fee: unknown;
-  cricos_tuition_fee_total: unknown;
-  cricos_estimated_total_cost: unknown;
-  duration_months: unknown;
-}) {
-  const totalFee = course.total_fee != null
-    ? Number(course.total_fee)
-    : course.cricos_tuition_fee_total != null
-      ? Number(course.cricos_tuition_fee_total)
-      : course.cricos_estimated_total_cost != null
-        ? Number(course.cricos_estimated_total_cost)
-        : null;
-  const durationMonths = course.duration_months == null ? null : Number(course.duration_months);
-  const annualFee = course.annual_fee != null
-    ? Number(course.annual_fee)
-    : totalFee && durationMonths
-      ? totalFee / Math.max(durationMonths / 12, 1)
-      : null;
-  return { totalFee, annualFee };
+type CourseRow = {
+  id: string;
+  university_id: string;
+  study_field_id: string | null;
+  name: string;
+  qualification_level: string | null;
+  cricos_code: string | null;
+  duration_months: number | null;
+  annual_fee: number | string | null;
+  total_fee: number | string | null;
+  currency: string | null;
+  delivery_mode: string | null;
+  official_course_url: string | null;
+  cricos_tuition_fee_total: number | string | null;
+  cricos_estimated_total_cost: number | string | null;
+  cricos_fee_source_url: string | null;
+  cricos_fee_verified_at: string | null;
+  cricos_expired: boolean | null;
+};
+
+type FeeRow = {
+  course_id: string;
+  fee_year: number | null;
+  student_type: string | null;
+  annual_fee: number | string | null;
+  total_fee: number | string | null;
+  currency: string | null;
+  source_url: string | null;
+  verified_at: string | null;
+  verification_status: string | null;
+};
+
+function resolveCourseFees(course: CourseRow, override?: FeeRow) {
+  const durationYears = course.duration_months ? Math.max(Number(course.duration_months) / 12, 1) : null;
+
+  if (override && (override.annual_fee != null || override.total_fee != null)) {
+    const totalFee = override.total_fee == null ? null : Number(override.total_fee);
+    const annualFee = override.annual_fee != null ? Number(override.annual_fee) : totalFee && durationYears ? totalFee / durationYears : null;
+    return {
+      annualFee,
+      totalFee,
+      currency: override.currency || course.currency || "AUD",
+      source: "verified_course_fee" as const,
+      feeYear: override.fee_year,
+      sourceUrl: override.source_url,
+      verifiedAt: override.verified_at,
+      verificationStatus: override.verification_status,
+      derivedAnnual: override.annual_fee == null && annualFee != null,
+    };
+  }
+
+  if (course.annual_fee != null || course.total_fee != null) {
+    const totalFee = course.total_fee == null ? null : Number(course.total_fee);
+    const annualFee = course.annual_fee != null ? Number(course.annual_fee) : totalFee && durationYears ? totalFee / durationYears : null;
+    return {
+      annualFee,
+      totalFee,
+      currency: course.currency || "AUD",
+      source: "course_record" as const,
+      feeYear: null,
+      sourceUrl: null,
+      verifiedAt: null,
+      verificationStatus: null,
+      derivedAnnual: course.annual_fee == null && annualFee != null,
+    };
+  }
+
+  if (course.cricos_tuition_fee_total != null) {
+    const totalFee = Number(course.cricos_tuition_fee_total);
+    const annualFee = durationYears ? totalFee / durationYears : null;
+    return {
+      annualFee,
+      totalFee,
+      currency: course.currency || "AUD",
+      source: "cricos_tuition_total" as const,
+      feeYear: null,
+      sourceUrl: course.cricos_fee_source_url,
+      verifiedAt: course.cricos_fee_verified_at,
+      verificationStatus: course.cricos_fee_verified_at ? "source_dated" : null,
+      derivedAnnual: annualFee != null,
+    };
+  }
+
+  return {
+    annualFee: null,
+    totalFee: null,
+    currency: course.currency || "AUD",
+    source: "unavailable" as const,
+    feeYear: null,
+    sourceUrl: null,
+    verifiedAt: null,
+    verificationStatus: null,
+    derivedAnnual: false,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -124,40 +177,31 @@ export async function GET(request: NextRequest) {
   const fullBudget = Number(params.get("fullBudget") ?? 80000);
 
   try {
-    const { data: studyFields, error: studyFieldError } = await supabase
-      .from("study_fields")
-      .select("id,name");
+    const [{ data: studyFields, error: studyFieldError }, { data: feeRows, error: feeRowsError }] = await Promise.all([
+      supabase.from("study_fields").select("id,name"),
+      supabase.from("course_fees").select("course_id,fee_year,student_type,annual_fee,total_fee,currency,source_url,verified_at,verification_status").order("fee_year", { ascending: false, nullsFirst: false }),
+    ]);
     if (studyFieldError) throw studyFieldError;
+    if (feeRowsError) throw feeRowsError;
+
     const fieldMap = new Map((studyFields ?? []).map((item) => [item.id, item.name]));
+    const latestInternationalFeeByCourse = new Map<string, FeeRow>();
+    for (const row of (feeRows ?? []) as FeeRow[]) {
+      if (!row.student_type?.toLowerCase().includes("international")) continue;
+      if (!latestInternationalFeeByCourse.has(row.course_id)) latestInternationalFeeByCourse.set(row.course_id, row);
+    }
 
-    const allCourses: Array<{
-      id: string;
-      university_id: string;
-      study_field_id: string | null;
-      name: string;
-      qualification_level: string | null;
-      cricos_code: string | null;
-      duration_months: number | null;
-      annual_fee: number | string | null;
-      total_fee: number | string | null;
-      currency: string | null;
-      delivery_mode: string | null;
-      official_course_url: string | null;
-      cricos_tuition_fee_total: number | string | null;
-      cricos_estimated_total_cost: number | string | null;
-      cricos_expired: boolean | null;
-    }> = [];
-
+    const allCourses: CourseRow[] = [];
     for (let from = 0; ; from += COURSE_BATCH_SIZE) {
       const { data: batch, error: batchError } = await supabase
         .from("courses")
-        .select("id,university_id,study_field_id,name,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,delivery_mode,official_course_url,cricos_tuition_fee_total,cricos_estimated_total_cost,cricos_expired")
+        .select("id,university_id,study_field_id,name,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,delivery_mode,official_course_url,cricos_tuition_fee_total,cricos_estimated_total_cost,cricos_fee_source_url,cricos_fee_verified_at,cricos_expired")
         .or("cricos_expired.is.null,cricos_expired.eq.false")
         .order("id")
         .range(from, from + COURSE_BATCH_SIZE - 1);
       if (batchError) throw batchError;
       if (!batch?.length) break;
-      allCourses.push(...batch);
+      allCourses.push(...(batch as CourseRow[]));
       if (batch.length < COURSE_BATCH_SIZE) break;
     }
 
@@ -165,16 +209,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ recommendations: [], totalCandidates: 0, enrichedCandidates: 0, source: "SUPABASE" });
     }
 
+    const feeCoverage = { verifiedCourseFee: 0, courseRecord: 0, cricosTuitionTotal: 0, unavailable: 0 };
     const preliminary = allCourses
       .map((course) => {
         const studyField = course.study_field_id ? fieldMap.get(course.study_field_id) ?? null : null;
         const academic = textScore(study || field, studyField, course.name, course.qualification_level);
         const career = inferredCareerScore(occupation, course.name, studyField, course.qualification_level);
-        const { totalFee, annualFee } = courseFees(course);
-        const affordability = affordabilityScore(totalFee, annualFee, fullBudget, semesterBudget);
+        const fee = resolveCourseFees(course, latestInternationalFeeByCourse.get(course.id));
+        if (fee.source === "verified_course_fee") feeCoverage.verifiedCourseFee += 1;
+        else if (fee.source === "course_record") feeCoverage.courseRecord += 1;
+        else if (fee.source === "cricos_tuition_total") feeCoverage.cricosTuitionTotal += 1;
+        else feeCoverage.unavailable += 1;
+        const affordability = affordabilityScore(fee.totalFee, fee.annualFee, fullBudget, semesterBudget);
         const studyPreference = textScore(study, course.name, studyField);
-        const preliminaryScore = clamp(academic * 0.32 + career * 0.38 + affordability * 0.20 + studyPreference * 0.10);
-        return { course, studyField, academic, career, affordability, preliminaryScore, totalFee, annualFee };
+        const feeConfidenceAdjustment = fee.source === "unavailable" ? -3 : fee.source === "cricos_tuition_total" ? 0 : 2;
+        const preliminaryScore = clamp(academic * 0.32 + career * 0.38 + affordability * 0.20 + studyPreference * 0.10 + feeConfidenceAdjustment);
+        return { course, studyField, academic, career, affordability, preliminaryScore, fee };
       })
       .sort((a, b) => b.preliminaryScore - a.preliminaryScore)
       .slice(0, ENRICHMENT_SHORTLIST_SIZE);
@@ -253,18 +303,14 @@ export async function GET(request: NextRequest) {
 
       const scholarshipIdsForCourse = scholarshipsByCourse.get(course.id) ?? [];
       const linkedScholarships = scholarshipIdsForCourse.map((id) => scholarshipMap.get(id)).filter(Boolean);
-      const bestScholarship = linkedScholarships.sort((a, b) =>
-        (Number(b!.percentage ?? 0) - Number(a!.percentage ?? 0)) ||
-        (Number(b!.amount ?? 0) - Number(a!.amount ?? 0)),
-      )[0] ?? null;
-      const scholarshipBoost = scholarshipImportance === "high"
-        ? (bestScholarship ? 8 : -10)
-        : scholarshipImportance === "prefer"
-          ? (bestScholarship ? 5 : 0)
-          : 0;
+      const bestScholarship = linkedScholarships.sort((a, b) => (Number(b!.percentage ?? 0) - Number(a!.percentage ?? 0)) || (Number(b!.amount ?? 0) - Number(a!.amount ?? 0)))[0] ?? null;
+      const scholarshipBoost = scholarshipImportance === "high" ? (bestScholarship ? 8 : -10) : scholarshipImportance === "prefer" ? (bestScholarship ? 5 : 0) : 0;
       const migration = migrationByCourse.get(course.id) ?? 45;
       const migrationWeight = migrationImportance === "high" ? 0.2 : migrationImportance === "consider" ? 0.1 : 0;
-      const baseOverall = base.academic * 0.26 + career * 0.34 + base.affordability * 0.20 + bestCampus.score * 0.20;
+      const affordabilityWeight = base.fee.source === "unavailable" ? 0.10 : 0.20;
+      const redistributedAcademicWeight = base.fee.source === "unavailable" ? 0.31 : 0.26;
+      const redistributedCareerWeight = base.fee.source === "unavailable" ? 0.39 : 0.34;
+      const baseOverall = base.academic * redistributedAcademicWeight + career * redistributedCareerWeight + base.affordability * affordabilityWeight + bestCampus.score * 0.20;
       const overall = clamp(baseOverall * (1 - migrationWeight) + migration * migrationWeight + scholarshipBoost);
       const living = livingMap.get(bestCampus.campus.id) ?? null;
 
@@ -275,50 +321,40 @@ export async function GET(request: NextRequest) {
           qualificationLevel: course.qualification_level,
           cricosCode: course.cricos_code,
           durationMonths: course.duration_months,
-          annualFee: base.annualFee,
-          totalFee: base.totalFee,
-          currency: course.currency || "AUD",
+          annualFee: base.fee.annualFee,
+          totalFee: base.fee.totalFee,
+          currency: base.fee.currency,
           deliveryMode: course.delivery_mode,
           officialCourseUrl: course.official_course_url,
           studyField: base.studyField,
         },
-        university: {
-          id: university.id,
-          name: university.name,
-          website: university.website,
-          logoUrl: university.logo_url,
-          cricosCode: university.cricos_code,
+        feeEvidence: {
+          source: base.fee.source,
+          feeYear: base.fee.feeYear,
+          derivedAnnual: base.fee.derivedAnnual,
+          sourceUrl: base.fee.sourceUrl,
+          verifiedAt: base.fee.verifiedAt,
+          verificationStatus: base.fee.verificationStatus,
+          note: base.fee.source === "cricos_tuition_total"
+            ? "Annual tuition is derived from the CRICOS total tuition amount and course duration."
+            : base.fee.source === "unavailable"
+              ? "No tuition amount is currently loaded, so affordability has reduced influence on this recommendation."
+              : base.fee.derivedAnnual
+                ? "Annual tuition is derived from a loaded total tuition amount and course duration."
+                : "A direct annual tuition amount is available.",
         },
+        university: { id: university.id, name: university.name, website: university.website, logoUrl: university.logo_url, cricosCode: university.cricos_code },
         campus: bestCampus.campus,
-        scholarship: bestScholarship ? {
-          id: bestScholarship.id,
-          name: bestScholarship.name,
-          percentage: bestScholarship.percentage == null ? null : Number(bestScholarship.percentage),
-          amount: bestScholarship.amount == null ? null : Number(bestScholarship.amount),
-        } : null,
-        livingCost: living ? {
-          weeklyLow: Number(living.weekly_low),
-          weeklyHigh: Number(living.weekly_high),
-          monthlyEstimate: Number(living.monthly_estimate),
-          status: living.verification_status,
-        } : null,
-        careerMatch: {
-          source: careerMatchSource,
-          linkedOccupations: occupationNames,
-        },
-        scores: {
-          academic: base.academic,
-          career,
-          affordability: base.affordability,
-          location: bestCampus.score,
-          migration,
-          overall,
-        },
+        scholarship: bestScholarship ? { id: bestScholarship.id, name: bestScholarship.name, percentage: bestScholarship.percentage == null ? null : Number(bestScholarship.percentage), amount: bestScholarship.amount == null ? null : Number(bestScholarship.amount) } : null,
+        livingCost: living ? { weeklyLow: Number(living.weekly_low), weeklyHigh: Number(living.weekly_high), monthlyEstimate: Number(living.monthly_estimate), status: living.verification_status } : null,
+        careerMatch: { source: careerMatchSource, linkedOccupations: occupationNames },
+        scores: { academic: base.academic, career, affordability: base.affordability, location: bestCampus.score, migration, overall },
         reasons: [
           base.academic >= 80 ? "Strong study-field match." : null,
           career >= 80 && careerMatchSource === "explicit_mapping" ? "Strong career match from an explicit course-to-career mapping." : null,
-          career >= 80 && careerMatchSource === "inferred_text" ? "Strong career relevance inferred from the course name and study field; no explicit course-to-career mapping is required for this heuristic." : null,
-          base.affordability >= 80 ? "Tuition is within or close to the stated budget using available fee data." : null,
+          career >= 80 && careerMatchSource === "inferred_text" ? "Strong career relevance inferred from the course name and study field." : null,
+          base.affordability >= 80 && base.fee.source !== "unavailable" ? "Tuition is within or close to the stated budget using available fee evidence." : null,
+          base.fee.source === "unavailable" ? "Tuition is not loaded, so affordability is not treated as strong evidence for or against this course." : null,
           bestCampus.score >= 85 ? "Campus matches the selected location preferences." : null,
           bestScholarship ? "A verified scholarship record is linked to this course." : null,
           living ? "A source-dated living-cost estimate is available for this campus." : null,
@@ -351,20 +387,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const representedUniversities = new Set(recommendations.map((item) => item.university.id)).size;
-    const representedCampuses = new Set(recommendations.map((item) => item.campus.id)).size;
-
     return NextResponse.json({
       recommendations,
       totalCandidates: allCourses.length,
       enrichedCandidates: courses.length,
       source: "SUPABASE_FULL_CATALOGUE",
       careerMatching: "explicit_mappings_plus_inferred_course_text",
+      feeCoverage,
+      feeMethod: "verified_course_fee_then_course_record_then_cricos_tuition_total",
       diversity: {
         primaryUniversityLimit: PRIMARY_UNIVERSITY_LIMIT,
         primaryCampusLimit: PRIMARY_CAMPUS_LIMIT,
-        representedUniversities,
-        representedCampuses,
+        representedUniversities: new Set(recommendations.map((item) => item.university.id)).size,
+        representedCampuses: new Set(recommendations.map((item) => item.campus.id)).size,
       },
     });
   } catch (error) {
