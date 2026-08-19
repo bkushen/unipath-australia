@@ -17,6 +17,7 @@ type CatalogueCourse = {
   verifiedAt: string | null;
   verificationStatus: string | null;
   officialCourseUrl: string | null;
+  officialCourseUrlVerifiedAt?: string | null;
   sourceUrl: string | null;
   university: {
     id: string;
@@ -36,7 +37,20 @@ type CatalogueCourse = {
   }>;
 };
 
+type CatalogueResponse = {
+  courses?: CatalogueCourse[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  hasPreviousPage?: boolean;
+  hasNextPage?: boolean;
+  error?: string;
+  detail?: string;
+};
+
 const states = ["ALL", "VIC", "NSW", "QLD", "SA", "WA", "TAS", "ACT", "NT"];
+const PAGE_SIZE = 100;
 const money = (value: number | null, currency = "AUD") => value == null
   ? "Fee not loaded"
   : new Intl.NumberFormat("en-AU", { style: "currency", currency: currency || "AUD", maximumFractionDigits: 0 }).format(value);
@@ -45,6 +59,9 @@ export default function CoursesPage() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [courses, setCourses] = useState<CatalogueCourse[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [state, setState] = useState("ALL");
@@ -54,7 +71,10 @@ export default function CoursesPage() {
   const [sort, setSort] = useState("name");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 280);
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(query.trim());
+      setPage(1);
+    }, 280);
     return () => window.clearTimeout(timer);
   }, [query]);
 
@@ -64,14 +84,17 @@ export default function CoursesPage() {
       setLoading(true);
       setError("");
       try {
-        const response = await fetch(`/api/local-v2/courses?q=${encodeURIComponent(debouncedQuery)}&limit=100`, { signal: controller.signal });
-        const data = (await response.json()) as { courses?: CatalogueCourse[]; error?: string; detail?: string };
+        const response = await fetch(`/api/local-v2/courses?q=${encodeURIComponent(debouncedQuery)}&page=${page}&pageSize=${PAGE_SIZE}`, { signal: controller.signal });
+        const data = (await response.json()) as CatalogueResponse;
         if (!response.ok) throw new Error(data.detail || data.error || "Unable to load courses.");
         setCourses(data.courses ?? []);
+        setTotal(data.total ?? 0);
+        setTotalPages(data.totalPages ?? 1);
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           setError((err as Error).message);
           setCourses([]);
+          setTotal(0);
         }
       } finally {
         setLoading(false);
@@ -79,7 +102,7 @@ export default function CoursesPage() {
     };
     load();
     return () => controller.abort();
-  }, [debouncedQuery]);
+  }, [debouncedQuery, page]);
 
   const qualifications = useMemo(() => [
     "ALL",
@@ -111,15 +134,24 @@ export default function CoursesPage() {
     setQualification("ALL");
     setMaxAnnualFee(80000);
     setSort("name");
+    setPage(1);
   };
+
+  const goToPage = (nextPage: number) => {
+    setPage(Math.min(Math.max(nextPage, 1), totalPages));
+    window.scrollTo({ top: 320, behavior: "smooth" });
+  };
+
+  const firstItem = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const lastItem = Math.min(page * PAGE_SIZE, total);
 
   return (
     <main style={pageStyle}>
       <section style={heroStyle}>
         <div style={heroInnerStyle}>
-          <div style={eyebrowStyle}>UNIPATH AUSTRALIA · LIVE COURSE DATABASE</div>
+          <div style={eyebrowStyle}>UNIPATH AUSTRALIA · FULL LIVE COURSE DATABASE</div>
           <h1 style={heroTitleStyle}>Search courses across Australia</h1>
-          <p style={heroTextStyle}>Browse real UniPath course and university records, compare locations and fees, and continue to the university’s official website.</p>
+          <p style={heroTextStyle}>Browse the complete UniPath course database. Results are loaded 100 at a time so thousands of courses stay fast and searchable.</p>
 
           <div style={searchShellStyle}>
             <span style={{ fontSize: 20 }}>⌕</span>
@@ -145,48 +177,38 @@ export default function CoursesPage() {
       <div style={contentGridStyle}>
         <aside style={filterPanelStyle}>
           <div style={filterHeaderStyle}><strong>Filters</strong><button type="button" onClick={clearFilters} style={resetButtonStyle}>Clear all</button></div>
-
-          <FilterGroup title="Qualification level">
-            <select value={qualification} onChange={(event) => setQualification(event.target.value)} style={controlStyle}>
-              {qualifications.map((item) => <option key={item} value={item}>{item === "ALL" ? "All levels" : item}</option>)}
-            </select>
-          </FilterGroup>
-
-          <FilterGroup title="State">
-            <select value={state} onChange={(event) => setState(event.target.value)} style={controlStyle}>
-              {states.map((item) => <option key={item} value={item}>{item === "ALL" ? "All states" : item}</option>)}
-            </select>
-          </FilterGroup>
-
-          <FilterGroup title="Study location">
-            <label style={checkRowStyle}><input type="checkbox" checked={regionalOnly} onChange={(event) => setRegionalOnly(event.target.checked)} /> Regional only</label>
-          </FilterGroup>
-
-          <FilterGroup title="Maximum annual tuition">
-            <input type="range" min="20000" max="80000" step="1000" value={maxAnnualFee} onChange={(event) => setMaxAnnualFee(Number(event.target.value))} style={{ width: "100%" }} />
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 6, color: "#475467", fontSize: 13 }}><span>A$20k</span><strong>{money(maxAnnualFee)}</strong></div>
-          </FilterGroup>
-
-          <div style={filterNoteStyle}>Course links marked “Official course page” use a verified university-course URL when one is stored. Otherwise UniPath links to the university website until that course URL is verified.</div>
+          <FilterGroup title="Qualification level"><select value={qualification} onChange={(event) => setQualification(event.target.value)} style={controlStyle}>{qualifications.map((item) => <option key={item} value={item}>{item === "ALL" ? "All levels" : item}</option>)}</select></FilterGroup>
+          <FilterGroup title="State"><select value={state} onChange={(event) => setState(event.target.value)} style={controlStyle}>{states.map((item) => <option key={item} value={item}>{item === "ALL" ? "All states" : item}</option>)}</select></FilterGroup>
+          <FilterGroup title="Study location"><label style={checkRowStyle}><input type="checkbox" checked={regionalOnly} onChange={(event) => setRegionalOnly(event.target.checked)} /> Regional only</label></FilterGroup>
+          <FilterGroup title="Maximum annual tuition"><input type="range" min="20000" max="80000" step="1000" value={maxAnnualFee} onChange={(event) => setMaxAnnualFee(Number(event.target.value))} style={{ width: "100%" }} /><div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, color: "#475467", fontSize: 13 }}><span>A$20k</span><strong>{money(maxAnnualFee)}</strong></div></FilterGroup>
+          <div style={filterNoteStyle}>All matching records are available through pagination. State, regional, qualification and fee filters currently apply to the loaded 100-course page; we can move these to server-side filtering next.</div>
         </aside>
 
         <section>
           <div style={resultsHeaderStyle}>
             <div>
-              <div style={resultCountStyle}>{loading ? "Loading courses…" : `${filteredCourses.length} course${filteredCourses.length === 1 ? "" : "s"}`}</div>
-              <div style={resultSubtextStyle}>Supabase-backed UniPath catalogue</div>
+              <div style={resultCountStyle}>{loading ? "Loading courses…" : `${total.toLocaleString()} course${total === 1 ? "" : "s"} found`}</div>
+              <div style={resultSubtextStyle}>{!loading && total > 0 ? `Showing ${firstItem.toLocaleString()}–${lastItem.toLocaleString()} · Page ${page} of ${totalPages.toLocaleString()}` : "Supabase-backed UniPath catalogue"}</div>
             </div>
-            <label style={sortWrapStyle}><span>Sort by</span><select value={sort} onChange={(event) => setSort(event.target.value)} style={sortStyle}><option value="name">Course name</option><option value="university">University</option><option value="fee-low">Lowest fee</option><option value="fee-high">Highest fee</option></select></label>
+            <label style={sortWrapStyle}><span>Sort current page by</span><select value={sort} onChange={(event) => setSort(event.target.value)} style={sortStyle}><option value="name">Course name</option><option value="university">University</option><option value="fee-low">Lowest fee</option><option value="fee-high">Highest fee</option></select></label>
           </div>
 
           {error && <div style={errorStyle}><strong>Couldn’t load the catalogue.</strong><div style={{ marginTop: 5 }}>{error}</div></div>}
 
           {!loading && !error && filteredCourses.length === 0 ? (
-            <div style={emptyStyle}><h2 style={{ marginTop: 0 }}>No courses match these filters</h2><p style={{ color: "#667085" }}>Try another keyword, state or fee range.</p><button type="button" onClick={clearFilters} style={primaryButtonStyle}>Clear filters</button></div>
+            <div style={emptyStyle}><h2 style={{ marginTop: 0 }}>No courses on this page match these filters</h2><p style={{ color: "#667085" }}>Try another page or clear the page filters.</p><button type="button" onClick={clearFilters} style={primaryButtonStyle}>Clear filters</button></div>
           ) : (
-            <div style={{ display: "grid", gap: 16 }}>
-              {filteredCourses.map((course) => <CourseCard key={course.id} course={course} />)}
-            </div>
+            <div style={{ display: "grid", gap: 16 }}>{filteredCourses.map((course) => <CourseCard key={course.id} course={course} />)}</div>
+          )}
+
+          {!loading && !error && totalPages > 1 && (
+            <nav aria-label="Course catalogue pagination" style={paginationStyle}>
+              <button type="button" disabled={page <= 1} onClick={() => goToPage(1)} style={pageButtonStyle}>« First</button>
+              <button type="button" disabled={page <= 1} onClick={() => goToPage(page - 1)} style={pageButtonStyle}>← Previous</button>
+              <span style={pageInfoStyle}>Page <strong>{page.toLocaleString()}</strong> of <strong>{totalPages.toLocaleString()}</strong></span>
+              <button type="button" disabled={page >= totalPages} onClick={() => goToPage(page + 1)} style={pageButtonStyle}>Next →</button>
+              <button type="button" disabled={page >= totalPages} onClick={() => goToPage(totalPages)} style={pageButtonStyle}>Last »</button>
+            </nav>
           )}
         </section>
       </div>
@@ -202,71 +224,29 @@ function CourseCard({ course }: { course: CatalogueCourse }) {
   const externalLabel = course.officialCourseUrl ? "Official course page ↗" : "University website ↗";
   const initials = (university?.name ?? "University").split(/\s+/).filter(Boolean).slice(0, 3).map((word) => word[0]).join("").toUpperCase();
 
-  return (
-    <article style={cardStyle}>
-      <div style={cardTopStyle}>
-        <div style={universityBrandStyle}>
-          <div style={logoShellStyle}>
-            {university?.logoUrl
-              ? <img src={university.logoUrl} alt={`${university.name} logo`} style={logoImageStyle} />
-              : <span style={logoFallbackStyle}>{initials}</span>}
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={universityStyle}>{university?.name ?? "University not linked"}</div>
-            <h2 style={courseTitleStyle}>{course.name}</h2>
-            <div style={metaRowStyle}>
-              {course.qualificationLevel && <span>{course.qualificationLevel}</span>}
-              {course.cricosCode && <><span>•</span><span>CRICOS {course.cricosCode}</span></>}
-            </div>
-          </div>
-        </div>
-        <div style={badgeWrapStyle}>
-          {course.campuses.some((campus) => campus.regional) && <span style={regionalBadgeStyle}>Regional option</span>}
-          <span style={liveBadgeStyle}>Live DB</span>
-        </div>
+  return <article style={cardStyle}>
+    <div style={cardTopStyle}>
+      <div style={universityBrandStyle}>
+        <div style={logoShellStyle}>{university?.logoUrl ? <img src={university.logoUrl} alt={`${university.name} logo`} style={logoImageStyle} /> : <span style={logoFallbackStyle}>{initials}</span>}</div>
+        <div style={{ minWidth: 0 }}><div style={universityStyle}>{university?.name ?? "University not linked"}</div><h2 style={courseTitleStyle}>{course.name}</h2><div style={metaRowStyle}>{course.qualificationLevel && <span>{course.qualificationLevel}</span>}{course.cricosCode && <><span>•</span><span>CRICOS {course.cricosCode}</span></>}</div></div>
       </div>
-
-      <div style={statsGridStyle}>
-        <Stat label="Annual tuition" value={money(course.annualFee, course.currency)} />
-        <Stat label="Total tuition" value={money(course.totalFee, course.currency)} />
-        <Stat label="Duration" value={duration} />
-        <Stat label="Delivery" value={course.deliveryMode || "Not loaded"} />
-      </div>
-
-      <div style={detailGridStyle}>
-        <div><div style={smallLabelStyle}>Campus</div><strong>{firstCampus ? `${firstCampus.name}${firstCampus.city ? ` · ${firstCampus.city}` : ""}${firstCampus.state ? `, ${firstCampus.state}` : ""}` : "Campus not linked"}</strong></div>
-        <div><div style={smallLabelStyle}>University CRICOS</div><strong>{university?.cricosCode || "Not loaded"}</strong></div>
-      </div>
-
-      {course.campuses.length > 1 && <div style={{ marginTop: 13 }}><div style={smallLabelStyle}>Other campus options</div><div style={chipsStyle}>{course.campuses.slice(1, 5).map((campus) => <span key={campus.id} style={chipStyle}>{campus.city || campus.name}{campus.state ? `, ${campus.state}` : ""}</span>)}</div></div>}
-
-      <div style={cardActionsStyle}>
-        {officialUrl
-          ? <a href={officialUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle}>{externalLabel}</a>
-          : <span style={disabledLinkStyle}>Official link not loaded</span>}
-        {university?.website && course.officialCourseUrl && <a href={university.website} target="_blank" rel="noreferrer" style={secondaryLinkStyle}>University website ↗</a>}
-        <button type="button" style={secondaryActionStyle}>♡ Save</button>
-        <a href={`/local-v2/compare?course=${course.id}`} style={secondaryLinkStyle}>+ Compare</a>
-      </div>
-
-      {!university?.logoUrl && <div style={logoNoteStyle}>University logo slot is ready; verified official logo asset still needs to be added for this university.</div>}
-    </article>
-  );
+      <div style={badgeWrapStyle}>{course.campuses.some((campus) => campus.regional) && <span style={regionalBadgeStyle}>Regional option</span>}<span style={liveBadgeStyle}>Live DB</span></div>
+    </div>
+    <div style={statsGridStyle}><Stat label="Annual tuition" value={money(course.annualFee, course.currency)} /><Stat label="Total tuition" value={money(course.totalFee, course.currency)} /><Stat label="Duration" value={duration} /><Stat label="Delivery" value={course.deliveryMode || "Not loaded"} /></div>
+    <div style={detailGridStyle}><div><div style={smallLabelStyle}>Campus</div><strong>{firstCampus ? `${firstCampus.name}${firstCampus.city ? ` · ${firstCampus.city}` : ""}${firstCampus.state ? `, ${firstCampus.state}` : ""}` : "Campus not linked"}</strong></div><div><div style={smallLabelStyle}>University CRICOS</div><strong>{university?.cricosCode || "Not loaded"}</strong></div></div>
+    {course.campuses.length > 1 && <div style={{ marginTop: 13 }}><div style={smallLabelStyle}>Other campus options</div><div style={chipsStyle}>{course.campuses.slice(1, 5).map((campus) => <span key={campus.id} style={chipStyle}>{campus.city || campus.name}{campus.state ? `, ${campus.state}` : ""}</span>)}</div></div>}
+    <div style={cardActionsStyle}>{officialUrl ? <a href={officialUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle}>{externalLabel}</a> : <span style={disabledLinkStyle}>Official link not loaded</span>}{university?.website && course.officialCourseUrl && <a href={university.website} target="_blank" rel="noreferrer" style={secondaryLinkStyle}>University website ↗</a>}<button type="button" style={secondaryActionStyle}>♡ Save</button><a href={`/local-v2/compare?course=${course.id}`} style={secondaryLinkStyle}>+ Compare</a></div>
+  </article>;
 }
 
-function FilterGroup({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div style={filterGroupStyle}><div style={filterTitleStyle}>{title}</div>{children}</div>;
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return <div style={statStyle}><div style={smallLabelStyle}>{label}</div><strong style={{ fontSize: 16 }}>{value}</strong></div>;
-}
+function FilterGroup({ title, children }: { title: string; children: React.ReactNode }) { return <div style={filterGroupStyle}><div style={filterTitleStyle}>{title}</div>{children}</div>; }
+function Stat({ label, value }: { label: string; value: string }) { return <div style={statStyle}><div style={smallLabelStyle}>{label}</div><strong style={{ fontSize: 16 }}>{value}</strong></div>; }
 
 const pageStyle = { minHeight: "100vh", background: "#f5f7fa", color: "#101828" } as const;
 const heroStyle = { background: "#0057b8", color: "#fff", padding: "42px 20px 30px" } as const;
 const heroInnerStyle = { maxWidth: 1180, margin: "0 auto" } as const;
 const eyebrowStyle = { fontSize: 12, letterSpacing: 0.8, fontWeight: 850, opacity: 0.86 } as const;
-const heroTitleStyle = { margin: "10px 0 10px", fontSize: 42, lineHeight: 1.08 } as const;
+const heroTitleStyle = { margin: "10px 0", fontSize: 42, lineHeight: 1.08 } as const;
 const heroTextStyle = { maxWidth: 820, margin: 0, color: "#e8f0fb", fontSize: 17, lineHeight: 1.55 } as const;
 const searchShellStyle = { marginTop: 24, display: "flex", alignItems: "center", gap: 10, background: "#fff", color: "#101828", borderRadius: 14, padding: "5px 7px 5px 16px", maxWidth: 850, boxShadow: "0 12px 30px rgba(0,0,0,0.14)" } as const;
 const heroSearchStyle = { flex: 1, border: 0, outline: 0, padding: "13px 4px", fontSize: 16, minWidth: 0 } as const;
@@ -283,7 +263,7 @@ const filterHeaderStyle = { display: "flex", justifyContent: "space-between", ga
 const resetButtonStyle = { border: 0, background: "transparent", color: "#0057b8", fontWeight: 750, cursor: "pointer", padding: 0 } as const;
 const filterGroupStyle = { padding: "16px 0", borderBottom: "1px solid #f0f2f5" } as const;
 const filterTitleStyle = { fontWeight: 800, marginBottom: 9, fontSize: 14 } as const;
-const controlStyle = { width: "100%", padding: "10px 10px", borderRadius: 9, border: "1px solid #d0d5dd", background: "#fff" } as const;
+const controlStyle = { width: "100%", padding: "10px", borderRadius: 9, border: "1px solid #d0d5dd", background: "#fff" } as const;
 const checkRowStyle = { display: "flex", gap: 8, alignItems: "center", color: "#344054", fontSize: 14 } as const;
 const filterNoteStyle = { marginTop: 16, padding: 12, background: "#f8fafc", borderRadius: 10, color: "#667085", fontSize: 12, lineHeight: 1.45 } as const;
 const resultsHeaderStyle = { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", marginBottom: 14, flexWrap: "wrap" } as const;
@@ -314,7 +294,9 @@ const primaryLinkStyle = { padding: "10px 13px", background: "#0057b8", color: "
 const secondaryLinkStyle = { padding: "10px 13px", border: "1px solid #d0d5dd", color: "#344054", borderRadius: 9, textDecoration: "none", fontWeight: 750, background: "#fff" } as const;
 const secondaryActionStyle = { padding: "10px 13px", border: "1px solid #d0d5dd", color: "#344054", borderRadius: 9, fontWeight: 750, background: "#fff", cursor: "pointer" } as const;
 const disabledLinkStyle = { padding: "10px 13px", borderRadius: 9, background: "#f2f4f7", color: "#98a2b3", fontWeight: 750 } as const;
-const logoNoteStyle = { marginTop: 12, color: "#667085", fontSize: 11 } as const;
 const emptyStyle = { border: "1px solid #e4e7ec", borderRadius: 16, background: "#fff", padding: 28, textAlign: "center" } as const;
 const errorStyle = { marginBottom: 14, border: "1px solid #fecdca", borderRadius: 12, background: "#fff6f5", color: "#b42318", padding: 14 } as const;
 const primaryButtonStyle = { border: 0, borderRadius: 9, background: "#0057b8", color: "#fff", padding: "10px 14px", fontWeight: 800, cursor: "pointer" } as const;
+const paginationStyle = { display: "flex", flexWrap: "wrap", gap: 9, justifyContent: "center", alignItems: "center", marginTop: 24, padding: 16, border: "1px solid #e4e7ec", borderRadius: 14, background: "#fff" } as const;
+const pageButtonStyle = { border: "1px solid #d0d5dd", borderRadius: 9, background: "#fff", padding: "9px 12px", fontWeight: 750, cursor: "pointer" } as const;
+const pageInfoStyle = { padding: "9px 12px", color: "#475467", fontSize: 14 } as const;
