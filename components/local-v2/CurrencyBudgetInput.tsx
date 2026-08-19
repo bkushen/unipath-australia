@@ -35,12 +35,13 @@ export function CurrencyBudgetInput({
   audCents: number;
   onAudCentsChange: (audCents: number) => void;
 }) {
-  const [currency, setCurrency] = useState("AUD");
-  const [amount, setAmount] = useState(() => Math.round(audCents / 100));
+  const [currency, setCurrency] = useState("LKR");
+  const [amount, setAmount] = useState(0);
   const [quote, setQuote] = useState<FxResponse | null>(null);
   const [supported, setSupported] = useState<string[]>(commonCurrencies);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sourceAmountReady, setSourceAmountReady] = useState(false);
   const callbackRef = useRef(onAudCentsChange);
 
   useEffect(() => {
@@ -51,6 +52,11 @@ export function CurrencyBudgetInput({
     if (currency === "AUD") {
       setQuote(null);
       setError("");
+      if (!sourceAmountReady) {
+        setAmount(Math.round(audCents / 100));
+        setSourceAmountReady(true);
+        return;
+      }
       const next = Math.round(amount * 100);
       if (next !== audCents) callbackRef.current(next);
       return;
@@ -69,6 +75,14 @@ export function CurrencyBudgetInput({
 
         setQuote(data);
         if (data.supportedCurrencies?.length) setSupported(data.supportedCurrencies);
+
+        if (!sourceAmountReady) {
+          const sourceAmount = data.rateToAud > 0 ? Math.round((audCents / 100) / data.rateToAud) : 0;
+          setAmount(sourceAmount);
+          setSourceAmountReady(true);
+          return;
+        }
+
         const next = Math.round(amount * data.rateToAud * 100);
         if (next !== audCents) callbackRef.current(next);
       } catch (err) {
@@ -82,7 +96,7 @@ export function CurrencyBudgetInput({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [amount, audCents, currency]);
+  }, [amount, audCents, currency, sourceAmountReady]);
 
   const audValue = useMemo(() => {
     if (currency === "AUD") return amount;
@@ -91,6 +105,12 @@ export function CurrencyBudgetInput({
   }, [amount, audCents, currency, quote]);
 
   const currencyOptions = useMemo(() => Array.from(new Set([...commonCurrencies, ...supported])).sort(), [supported]);
+
+  const changeCurrency = (nextCurrency: string) => {
+    setCurrency(nextCurrency);
+    setQuote(null);
+    setSourceAmountReady(false);
+  };
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
@@ -101,17 +121,20 @@ export function CurrencyBudgetInput({
           min={0}
           step={1000}
           value={amount}
-          onChange={(event) => setAmount(Number(event.target.value) || 0)}
+          onChange={(event) => {
+            setSourceAmountReady(true);
+            setAmount(Number(event.target.value) || 0);
+          }}
           style={inputStyle}
           aria-label={`${label} amount`}
         />
-        <select value={currency} onChange={(event) => setCurrency(event.target.value)} style={inputStyle} aria-label="Budget currency">
+        <select value={currency} onChange={(event) => changeCurrency(event.target.value)} style={inputStyle} aria-label="Budget currency">
           {currencyOptions.map((code) => <option key={code} value={code}>{code}</option>)}
         </select>
       </div>
 
       <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 14 }}>
-        <strong>AUD equivalent:</strong> {loading ? "Updating…" : formatAud(audValue)}
+        <strong>AUD equivalent:</strong> {loading && !quote ? "Updating…" : formatAud(audValue)}
         {currency !== "AUD" && quote && (
           <div style={{ marginTop: 4, color: "#586174", fontSize: 12 }}>
             1 {currency} = {quote.rateToAud.toLocaleString("en-AU", { maximumFractionDigits: 8 })} AUD · latest daily rate effective {quote.effectiveAt ? new Date(quote.effectiveAt).toLocaleString("en-AU") : "today"}.
