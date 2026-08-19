@@ -3,6 +3,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 100;
+const VALID_STATES = new Set(["VIC", "NSW", "QLD", "SA", "WA", "TAS", "ACT", "NT"]);
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -24,17 +25,30 @@ export async function GET(request: NextRequest) {
   const q = clean(request.nextUrl.searchParams.get("q"));
   const page = Math.max(Number(request.nextUrl.searchParams.get("page")) || 1, 1);
   const pageSize = Math.min(Math.max(Number(request.nextUrl.searchParams.get("pageSize")) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+  const stateParam = clean(request.nextUrl.searchParams.get("state")).toUpperCase();
+  const state = VALID_STATES.has(stateParam) ? stateParam : "";
+  const regionalOnly = request.nextUrl.searchParams.get("regional") === "true";
+  const qualification = clean(request.nextUrl.searchParams.get("qualification"));
+  const maxAnnualFeeRaw = Number(request.nextUrl.searchParams.get("maxAnnualFee"));
+  const maxAnnualFee = Number.isFinite(maxAnnualFeeRaw) && maxAnnualFeeRaw > 0 ? maxAnnualFeeRaw : null;
+  const sort = clean(request.nextUrl.searchParams.get("sort")) || "name";
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   const supabase = getSupabase();
 
   try {
+    const needsCampusFilter = Boolean(state || regionalOnly);
+    const relationSelect = needsCampusFilter
+      ? ",course_campuses!inner(campuses!inner(state,regional))"
+      : "";
+
     let courseQuery = supabase
       .from("courses")
-      .select("id,university_id,study_field_id,name,slug,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,description,official_course_url,official_course_url_verified_at,source_url,verified_at,verification_status,delivery_mode,cricos_expired", { count: "exact" })
-      .or("cricos_expired.is.null,cricos_expired.eq.false")
-      .order("name")
-      .range(from, to);
+      .select(
+        `id,university_id,study_field_id,name,slug,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,description,official_course_url,official_course_url_verified_at,source_url,verified_at,verification_status,delivery_mode,cricos_expired${relationSelect}`,
+        { count: "exact" },
+      )
+      .or("cricos_expired.is.null,cricos_expired.eq.false");
 
     if (q) {
       courseQuery = courseQuery.or(
@@ -42,8 +56,28 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { data: courses, error: courseError, count } = await courseQuery;
+    if (qualification) courseQuery = courseQuery.eq("qualification_level", qualification);
+    if (maxAnnualFee) courseQuery = courseQuery.or(`annual_fee.is.null,annual_fee.lte.${maxAnnualFee}`);
+    if (state) courseQuery = courseQuery.eq("course_campuses.campuses.state", state);
+    if (regionalOnly) courseQuery = courseQuery.eq("course_campuses.campuses.regional", true);
+
+    if (sort === "fee-low") {
+      courseQuery = courseQuery.order("annual_fee", { ascending: true, nullsFirst: false }).order("name");
+    } else if (sort === "fee-high") {
+      courseQuery = courseQuery.order("annual_fee", { ascending: false, nullsFirst: false }).order("name");
+    } else {
+      courseQuery = courseQuery.order("name");
+    }
+
+    courseQuery = courseQuery.range(from, to);
+
+    const [{ data: courses, error: courseError, count }, { data: qualificationRows, error: qualificationError }] = await Promise.all([
+      courseQuery,
+      supabase.rpc("catalogue_qualification_levels"),
+    ]);
+
     if (courseError) throw courseError;
+    if (qualificationError) throw qualificationError;
 
     const universityIds = Array.from(new Set((courses ?? []).map((course) => course.university_id).filter(Boolean)));
     const courseIds = (courses ?? []).map((course) => course.id);
@@ -117,6 +151,10 @@ export async function GET(request: NextRequest) {
 
     const total = count ?? 0;
     const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+    const qualificationOptions = (qualificationRows ?? [])
+      .map((row) => row.qualification_level)
+      .filter((value): value is string => Boolean(value));
+
     return NextResponse.json({
       courses: results,
       count: results.length,
@@ -126,6 +164,7 @@ export async function GET(request: NextRequest) {
       totalPages,
       hasPreviousPage: page > 1,
       hasNextPage: page < totalPages,
+      qualificationOptions,
       source: "SUPABASE",
     });
   } catch (error) {
