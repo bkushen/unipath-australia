@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 type SearchType = "qualification" | "study_field" | "occupation" | "course" | "location";
 
@@ -23,6 +23,23 @@ function cleanQuery(value: string) {
   return value.trim().replace(/[%_,]/g, " ").replace(/\s+/g, " ").slice(0, 80);
 }
 
+function getSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+  if (!url || !key) {
+    throw new Error("Supabase public environment variables are missing.");
+  }
+
+  return createSupabaseClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
 export async function GET(request: NextRequest) {
   const type = request.nextUrl.searchParams.get("type") as SearchType | null;
   const q = cleanQuery(request.nextUrl.searchParams.get("q") || "");
@@ -31,9 +48,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid search type." }, { status: 400 });
   }
 
-  const supabase = await createClient();
-
   try {
+    const supabase = getSupabase();
     let options: SearchOption[] = [];
 
     if (type === "qualification") {
@@ -41,11 +57,13 @@ export async function GET(request: NextRequest) {
         .from("courses")
         .select("qualification_level")
         .not("qualification_level", "is", null)
-        .limit(500);
+        .limit(1000);
       if (q) query = query.ilike("qualification_level", `%${q}%`);
       const { data, error } = await query;
       if (error) throw error;
-      const values = Array.from(new Set((data ?? []).map((row) => row.qualification_level).filter(Boolean))).sort();
+      const values = Array.from(
+        new Set((data ?? []).map((row) => row.qualification_level).filter((value): value is string => Boolean(value))),
+      ).sort();
       options = values.slice(0, 20).map((value) => ({ id: `qualification:${value}`, label: value, value }));
     }
 
@@ -73,8 +91,8 @@ export async function GET(request: NextRequest) {
     if (type === "course") {
       let query = supabase
         .from("courses")
-        .select("id,name,qualification_level,university_id")
-        .eq("cricos_expired", false)
+        .select("id,name,qualification_level,university_id,cricos_expired")
+        .or("cricos_expired.is.null,cricos_expired.eq.false")
         .order("name")
         .limit(20);
       if (q) query = query.or(`name.ilike.%${q}%,qualification_level.ilike.%${q}%`);
@@ -93,13 +111,12 @@ export async function GET(request: NextRequest) {
         .from("campuses")
         .select("id,name,city,state,postcode")
         .order("city")
-        .limit(30);
+        .limit(50);
       if (q) query = query.or(`city.ilike.%${q}%,name.ilike.%${q}%,state.ilike.%${q}%,postcode.ilike.%${q}%`);
       const { data, error } = await query;
       if (error) throw error;
 
       const seen = new Set<string>();
-      options = [];
       for (const row of data ?? []) {
         const value = `${row.city}, ${row.state}`;
         if (seen.has(value)) continue;
@@ -117,9 +134,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ options, source: "SUPABASE", type, query: q });
   } catch (error) {
-    console.error("Quick Match option search failed", error);
+    const detail = error instanceof Error ? error.message : "Unknown database search error";
+    console.error("Quick Match option search failed", detail);
     return NextResponse.json(
-      { error: "Unable to search the UniPath database right now.", options: [] },
+      { error: "Unable to search the UniPath database right now.", detail, options: [] },
       { status: 500 },
     );
   }
