@@ -21,6 +21,8 @@ export interface StudentDecisionProfile {
   highestQualification: string;
   qualificationField: string;
   desiredOccupation: string;
+  preferredStudy?: string;
+  preferredLocation?: string;
   annualTuitionBudgetCents: number;
   semesterTuitionBudgetCents?: number;
   fullCourseBudgetCents?: number;
