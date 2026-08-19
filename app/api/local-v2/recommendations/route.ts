@@ -1,0 +1,181 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+
+const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
+const words = (value: string) => value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+function getSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !key) throw new Error("Supabase public environment variables are missing.");
+  return createSupabaseClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+}
+
+function textScore(query: string, ...values: Array<string | null | undefined>) {
+  if (!query.trim()) return 70;
+  const queryWords = words(query);
+  const haystack = values.filter(Boolean).join(" ").toLowerCase();
+  if (!haystack) return 50;
+  if (haystack.includes(query.toLowerCase())) return 100;
+  const overlap = queryWords.filter((word) => haystack.includes(word)).length;
+  return clamp(45 + overlap * 18);
+}
+
+function affordabilityScore(totalFee: number | null, annualFee: number | null, fullBudget: number, semesterBudget: number) {
+  const effectiveAnnual = annualFee ?? (totalFee ? totalFee / 2 : null);
+  if (!effectiveAnnual && !totalFee) return 60;
+  const semester = effectiveAnnual ? effectiveAnnual / 2 : null;
+  const ratio = (cost: number | null, budget: number) => {
+    if (!cost || budget <= 0) return 60;
+    const r = cost / budget;
+    if (r <= 0.8) return 100;
+    if (r <= 1) return clamp(100 - (r - 0.8) * 100);
+    return clamp(80 - (r - 1) * 120);
+  };
+  return clamp(ratio(semester, semesterBudget) * 0.45 + ratio(totalFee, fullBudget) * 0.55);
+}
+
+export async function GET(request: NextRequest) {
+  const supabase = getSupabase();
+  const params = request.nextUrl.searchParams;
+  const study = (params.get("study") ?? "").trim().slice(0, 100);
+  const field = (params.get("field") ?? "").trim().slice(0, 100);
+  const occupation = (params.get("occupation") ?? "").trim().slice(0, 100);
+  const location = (params.get("location") ?? "").trim().slice(0, 100);
+  const states = (params.get("states") ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+  const regionalAccepted = params.get("regionalAccepted") !== "false";
+  const migrationImportance = params.get("migrationImportance") ?? "none";
+  const scholarshipImportance = params.get("scholarshipImportance") ?? "prefer";
+  const semesterBudget = Number(params.get("semesterBudget") ?? 20000);
+  const fullBudget = Number(params.get("fullBudget") ?? 80000);
+
+  try {
+    let courseQuery = supabase
+      .from("courses")
+      .select("id,university_id,study_field_id,name,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,delivery_mode,official_course_url,cricos_tuition_fee_total,cricos_estimated_total_cost,cricos_expired")
+      .or("cricos_expired.is.null,cricos_expired.eq.false")
+      .limit(500);
+
+    const search = study || field;
+    if (search) {
+      const safe = search.replace(/[%_,()]/g, " ").trim();
+      if (safe) courseQuery = courseQuery.or(`name.ilike.%${safe}%,qualification_level.ilike.%${safe}%`);
+    }
+
+    const { data: courses, error: courseError } = await courseQuery;
+    if (courseError) throw courseError;
+    if (!courses?.length) return NextResponse.json({ recommendations: [], totalCandidates: 0, source: "SUPABASE" });
+
+    const universityIds = [...new Set(courses.map((item) => item.university_id).filter(Boolean))];
+    const fieldIds = [...new Set(courses.map((item) => item.study_field_id).filter(Boolean))];
+    const courseIds = courses.map((item) => item.id);
+
+    const [{ data: universities }, { data: studyFields }, { data: campusLinks }, { data: occupationLinks }, { data: scholarshipLinks }, { data: skilledLinks }] = await Promise.all([
+      supabase.from("universities").select("id,name,website,logo_url,cricos_code").in("id", universityIds),
+      fieldIds.length ? supabase.from("study_fields").select("id,name").in("id", fieldIds) : Promise.resolve({ data: [] }),
+      supabase.from("course_campuses").select("course_id,campus_id").in("course_id", courseIds),
+      supabase.from("course_occupations").select("course_id,occupation_id,alignment_score").in("course_id", courseIds),
+      supabase.from("course_scholarships").select("course_id,scholarship_id").in("course_id", courseIds),
+      supabase.from("course_skilled_occupation_links").select("course_id,skilled_occupation_id,confidence").in("course_id", courseIds),
+    ]);
+
+    const campusIds = [...new Set((campusLinks ?? []).map((item) => item.campus_id))];
+    const occupationIds = [...new Set((occupationLinks ?? []).map((item) => item.occupation_id))];
+    const scholarshipIds = [...new Set((scholarshipLinks ?? []).map((item) => item.scholarship_id))];
+
+    const [{ data: campuses }, { data: occupations }, { data: scholarships }, { data: livingCosts }] = await Promise.all([
+      campusIds.length ? supabase.from("campuses").select("id,name,city,state,postcode,regional,regional_verified,regional_classification").in("id", campusIds) : Promise.resolve({ data: [] }),
+      occupationIds.length ? supabase.from("occupations").select("id,name").in("id", occupationIds) : Promise.resolve({ data: [] }),
+      scholarshipIds.length ? supabase.from("scholarships").select("id,name,amount,percentage").in("id", scholarshipIds) : Promise.resolve({ data: [] }),
+      campusIds.length ? supabase.from("living_costs").select("campus_id,weekly_low,weekly_high,monthly_estimate,verification_status").in("campus_id", campusIds) : Promise.resolve({ data: [] }),
+    ]);
+
+    const universityMap = new Map((universities ?? []).map((item) => [item.id, item]));
+    const fieldMap = new Map((studyFields ?? []).map((item) => [item.id, item.name]));
+    const campusMap = new Map((campuses ?? []).map((item) => [item.id, item]));
+    const occupationMap = new Map((occupations ?? []).map((item) => [item.id, item.name]));
+    const scholarshipMap = new Map((scholarships ?? []).map((item) => [item.id, item]));
+    const livingMap = new Map((livingCosts ?? []).map((item) => [item.campus_id, item]));
+
+    const campusesByCourse = new Map<string, string[]>();
+    for (const link of campusLinks ?? []) campusesByCourse.set(link.course_id, [...(campusesByCourse.get(link.course_id) ?? []), link.campus_id]);
+    const occupationsByCourse = new Map<string, Array<{ id: string; score: number | null }>>();
+    for (const link of occupationLinks ?? []) occupationsByCourse.set(link.course_id, [...(occupationsByCourse.get(link.course_id) ?? []), { id: link.occupation_id, score: link.alignment_score }]);
+    const scholarshipsByCourse = new Map<string, string[]>();
+    for (const link of scholarshipLinks ?? []) scholarshipsByCourse.set(link.course_id, [...(scholarshipsByCourse.get(link.course_id) ?? []), link.scholarship_id]);
+    const migrationByCourse = new Map<string, number>();
+    for (const link of skilledLinks ?? []) migrationByCourse.set(link.course_id, Math.max(migrationByCourse.get(link.course_id) ?? 0, link.confidence === "high" ? 90 : link.confidence === "medium" ? 75 : 60));
+
+    const recommendations = courses.flatMap((course) => {
+      const university = universityMap.get(course.university_id);
+      const linkedCampusIds = campusesByCourse.get(course.id) ?? [];
+      const linkedCampuses = linkedCampusIds.map((id) => campusMap.get(id)).filter(Boolean);
+      if (!university || linkedCampuses.length === 0) return [];
+
+      const bestCampus = linkedCampuses
+        .map((campus) => {
+          const stateMatch = states.length === 0 || states.includes(campus!.state ?? "");
+          const locationMatch = !location || textScore(location, campus!.name, campus!.city, campus!.state) >= 80;
+          const regionalBonus = campus!.regional && regionalAccepted ? 8 : 0;
+          const score = clamp((stateMatch ? 88 : 45) + (locationMatch ? 7 : 0) + regionalBonus);
+          return { campus: campus!, score };
+        })
+        .sort((a, b) => b.score - a.score)[0];
+
+      const studyField = fieldMap.get(course.study_field_id) ?? null;
+      const linkedOccupationRows = occupationsByCourse.get(course.id) ?? [];
+      const occupationNames = linkedOccupationRows.map((item) => occupationMap.get(item.id)).filter(Boolean) as string[];
+      const career = occupationNames.length ? Math.max(...occupationNames.map((name) => textScore(occupation, name))) : textScore(occupation, course.name, studyField);
+      const academic = textScore(field || study, studyField, course.name, course.qualification_level);
+
+      const totalFee = course.total_fee != null ? Number(course.total_fee) : course.cricos_tuition_fee_total != null ? Number(course.cricos_tuition_fee_total) : course.cricos_estimated_total_cost != null ? Number(course.cricos_estimated_total_cost) : null;
+      const annualFee = course.annual_fee != null ? Number(course.annual_fee) : totalFee && course.duration_months ? totalFee / Math.max(course.duration_months / 12, 1) : null;
+      const affordability = affordabilityScore(totalFee, annualFee, fullBudget, semesterBudget);
+
+      const scholarshipIdsForCourse = scholarshipsByCourse.get(course.id) ?? [];
+      const linkedScholarships = scholarshipIdsForCourse.map((id) => scholarshipMap.get(id)).filter(Boolean);
+      const bestScholarship = linkedScholarships.sort((a, b) => (Number(b!.percentage ?? 0) - Number(a!.percentage ?? 0)) || (Number(b!.amount ?? 0) - Number(a!.amount ?? 0)))[0] ?? null;
+      const scholarshipBoost = scholarshipImportance === "high" ? (bestScholarship ? 8 : -10) : scholarshipImportance === "prefer" ? (bestScholarship ? 5 : 0) : 0;
+      const migration = migrationByCourse.get(course.id) ?? 45;
+      const migrationWeight = migrationImportance === "high" ? 0.2 : migrationImportance === "consider" ? 0.1 : 0;
+      const baseOverall = academic * 0.28 + career * 0.3 + affordability * 0.22 + bestCampus.score * 0.2;
+      const overall = clamp(baseOverall * (1 - migrationWeight) + migration * migrationWeight + scholarshipBoost);
+      const living = livingMap.get(bestCampus.campus.id) ?? null;
+
+      return [{
+        course: {
+          id: course.id,
+          name: course.name,
+          qualificationLevel: course.qualification_level,
+          cricosCode: course.cricos_code,
+          durationMonths: course.duration_months,
+          annualFee,
+          totalFee,
+          currency: course.currency || "AUD",
+          deliveryMode: course.delivery_mode,
+          officialCourseUrl: course.official_course_url,
+          studyField,
+        },
+        university: { id: university.id, name: university.name, website: university.website, logoUrl: university.logo_url, cricosCode: university.cricos_code },
+        campus: bestCampus.campus,
+        scholarship: bestScholarship ? { id: bestScholarship.id, name: bestScholarship.name, percentage: bestScholarship.percentage == null ? null : Number(bestScholarship.percentage), amount: bestScholarship.amount == null ? null : Number(bestScholarship.amount) } : null,
+        livingCost: living ? { weeklyLow: Number(living.weekly_low), weeklyHigh: Number(living.weekly_high), monthlyEstimate: Number(living.monthly_estimate), status: living.verification_status } : null,
+        scores: { academic, career, affordability, location: bestCampus.score, migration, overall },
+        reasons: [
+          academic >= 80 ? "Strong study-field match." : null,
+          career >= 80 ? "Strong career-direction match from available occupation/course evidence." : null,
+          affordability >= 80 ? "Tuition is within or close to the stated budget using available fee data." : null,
+          bestCampus.score >= 85 ? "Campus matches the selected location preferences." : null,
+          bestScholarship ? "A verified scholarship record is linked to this course." : null,
+          living ? "A source-dated living-cost estimate is available for this campus." : null,
+        ].filter(Boolean),
+      }];
+    }).sort((a, b) => b.scores.overall - a.scores.overall).slice(0, 12);
+
+    return NextResponse.json({ recommendations, totalCandidates: courses.length, source: "SUPABASE" });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("Live recommendations failed", detail);
+    return NextResponse.json({ recommendations: [], error: "Unable to calculate live recommendations.", detail }, { status: 500 });
+  }
+}
