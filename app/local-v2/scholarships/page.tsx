@@ -1,168 +1,113 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { demoCampuses, demoCourses, demoUniversities } from "@/lib/local-v2/fixtures";
+import { useEffect, useMemo, useState } from "react";
 
-function money(cents: number) {
-  return new Intl.NumberFormat("en-AU", {
-    style: "currency",
-    currency: "AUD",
-    maximumFractionDigits: 0,
-  }).format(cents / 100);
-}
+type Scholarship = {
+  id: string;
+  name: string;
+  amount: number | null;
+  percentage: number | null;
+  eligibility: string | null;
+  sourceUrl: string | null;
+  verifiedAt: string | null;
+  university: { id: string; name: string; website: string | null; logoUrl: string | null } | null;
+  linkedCourses: Array<{ id: string; name: string; qualificationLevel: string | null; annualFee: number | null; currency: string }>;
+};
 
-const panelStyle = {
-  border: "1px solid #dfe3ea",
-  borderRadius: 16,
-  padding: 18,
-  background: "#fff",
-} as const;
-
-const inputStyle = {
-  width: "100%",
-  border: "1px solid #cfd5df",
-  borderRadius: 10,
-  padding: "10px 12px",
-  background: "#fff",
-} as const;
+const money = (value: number | null, currency = "AUD") => value == null ? "Value not loaded" : new Intl.NumberFormat("en-AU", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
 
 export default function ScholarshipsPage() {
-  const [state, setState] = useState("ALL");
-  const [minimumPercent, setMinimumPercent] = useState(1);
-  const [regionalOnly, setRegionalOnly] = useState(false);
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [scholarships, setScholarships] = useState<Scholarship[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [minimumPercent, setMinimumPercent] = useState(0);
+  const [linkedOnly, setLinkedOnly] = useState(false);
 
-  const results = useMemo(() => {
-    return demoCourses
-      .map((course) => {
-        const university = demoUniversities.find((item) => item.id === course.universityId);
-        const campus = demoCampuses.find((item) => item.id === course.campusId);
-        const percent = course.scholarshipPercent ?? 0;
-        const annualSavingCents = Math.round(course.annualTuitionCents * (percent / 100));
-        const totalSavingCents = Math.round(annualSavingCents * course.durationYears);
-        const annualAfterScholarshipCents = course.annualTuitionCents - annualSavingCents;
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
-        return {
-          course,
-          university,
-          campus,
-          percent,
-          annualSavingCents,
-          totalSavingCents,
-          annualAfterScholarshipCents,
-        };
-      })
-      .filter((item) => item.percent >= minimumPercent)
-      .filter((item) => state === "ALL" || item.campus?.state === state)
-      .filter((item) => !regionalOnly || item.campus?.regional)
-      .sort((a, b) => b.percent - a.percent || b.totalSavingCents - a.totalSavingCents);
-  }, [state, minimumPercent, regionalOnly]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams();
+        if (debouncedQuery) params.set("q", debouncedQuery);
+        const response = await fetch(`/api/local-v2/scholarships?${params.toString()}`, { signal: controller.signal });
+        const data = await response.json() as { scholarships?: Scholarship[]; error?: string; detail?: string };
+        if (!response.ok) throw new Error(data.detail || data.error || "Unable to load scholarships.");
+        setScholarships(data.scholarships ?? []);
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") setError((err as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+    return () => controller.abort();
+  }, [debouncedQuery]);
+
+  const results = useMemo(() => scholarships
+    .filter((item) => minimumPercent === 0 || (item.percentage ?? 0) >= minimumPercent)
+    .filter((item) => !linkedOnly || item.linkedCourses.length > 0)
+    .sort((a, b) => (b.percentage ?? 0) - (a.percentage ?? 0) || (b.amount ?? 0) - (a.amount ?? 0)), [scholarships, minimumPercent, linkedOnly]);
 
   return (
-    <main style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 18px 70px", background: "#f6f8fb", minHeight: "100vh" }}>
-      <div style={{ marginBottom: 22 }}>
-        <span style={{ display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff2cc", fontWeight: 750 }}>
-          LOCAL DEMO SCHOLARSHIPS
-        </span>
-        <h1 style={{ marginBottom: 8 }}>Scholarship Explorer</h1>
-        <p style={{ color: "#586174", maxWidth: 800 }}>
-          Filter course-level scholarship examples and compare estimated tuition savings. These scholarship values are local demo data only.
-        </p>
-      </div>
-
-      <section style={panelStyle}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-          <label style={{ display: "grid", gap: 7, fontWeight: 650 }}>
-            State
-            <select value={state} onChange={(e) => setState(e.target.value)} style={inputStyle}>
-              <option value="ALL">All states</option>
-              <option value="VIC">Victoria</option>
-              <option value="NSW">New South Wales</option>
-              <option value="QLD">Queensland</option>
-              <option value="SA">South Australia</option>
-            </select>
-          </label>
-
-          <label style={{ display: "grid", gap: 7, fontWeight: 650 }}>
-            Minimum scholarship
-            <select value={minimumPercent} onChange={(e) => setMinimumPercent(Number(e.target.value))} style={inputStyle}>
-              <option value={1}>Any scholarship</option>
-              <option value={5}>5% or more</option>
-              <option value={8}>8% or more</option>
-              <option value={10}>10% or more</option>
-              <option value={12}>12% or more</option>
-            </select>
-          </label>
-
-          <label style={{ display: "flex", gap: 9, alignItems: "center", alignSelf: "end", paddingBottom: 10, fontWeight: 650 }}>
-            <input type="checkbox" checked={regionalOnly} onChange={(e) => setRegionalOnly(e.target.checked)} />
-            Regional campuses only
-          </label>
+    <main style={{ minHeight: "100vh", background: "#f5f7fa", color: "#101828" }}>
+      <section style={{ background: "#0057b8", color: "#fff", padding: "42px 20px 32px" }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <div style={{ fontSize: 12, fontWeight: 850, letterSpacing: .8 }}>UNIPATH AUSTRALIA · LIVE SCHOLARSHIP DATABASE</div>
+          <h1 style={{ fontSize: 42, margin: "10px 0" }}>Scholarship Explorer</h1>
+          <p style={{ maxWidth: 800, color: "#e8f0fb", lineHeight: 1.55 }}>Browse verified scholarship records, eligibility, provider sources and linked courses.</p>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search scholarship name" style={{ width: "min(760px,100%)", padding: "13px 14px", borderRadius: 12, border: 0, marginTop: 12, fontSize: 16 }} />
         </div>
       </section>
 
-      <section style={{ marginTop: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <h2 style={{ marginBottom: 8 }}>Scholarship matches</h2>
-          <strong>{results.length} result{results.length === 1 ? "" : "s"}</strong>
+      <div style={{ maxWidth: 1120, margin: "0 auto", padding: "24px 20px 70px" }}>
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 14, padding: 18, background: "#fff", border: "1px solid #e4e7ec", borderRadius: 16 }}>
+          <label style={{ display: "grid", gap: 7, fontWeight: 750 }}>Minimum percentage
+            <select value={minimumPercent} onChange={(e) => setMinimumPercent(Number(e.target.value))} style={{ padding: 10, border: "1px solid #d0d5dd", borderRadius: 9 }}>
+              <option value={0}>Any value</option><option value={10}>10%+</option><option value={20}>20%+</option><option value={25}>25%+</option><option value={50}>50%+</option>
+            </select>
+          </label>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}><input type="checkbox" checked={linkedOnly} onChange={(e) => setLinkedOnly(e.target.checked)} /> Only scholarships linked to courses</label>
+        </section>
+
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center", margin: "22px 0 14px" }}>
+          <div><strong style={{ fontSize: 22 }}>{loading ? "Loading scholarships…" : `${results.length} scholarship${results.length === 1 ? "" : "s"}`}</strong><div style={{ color: "#667085" }}>Live Supabase records only</div></div>
+          <Link href="/local-v2/courses">Browse all courses →</Link>
         </div>
 
-        {results.length === 0 ? (
-          <div style={{ ...panelStyle, marginTop: 8, background: "#fff7ed", borderColor: "#fed7aa" }}>
-            No demo scholarship matches these filters. Try lowering the minimum percentage or turning off regional-only.
-          </div>
+        {error && <div style={{ padding: 14, borderRadius: 12, background: "#fff6f5", color: "#b42318" }}>{error}</div>}
+
+        {!loading && !error && results.length === 0 ? (
+          <section style={{ background: "#fff", border: "1px solid #e4e7ec", borderRadius: 16, padding: 28 }}>
+            <h2 style={{ marginTop: 0 }}>No verified scholarship records are loaded yet</h2>
+            <p style={{ color: "#667085", lineHeight: 1.55 }}>The scholarship tables are connected, but the live database currently contains no scholarship rows. UniPath will show scholarships here only after their names, values, eligibility and official sources have been verified and stored.</p>
+            <p style={{ color: "#667085" }}>Demo scholarship percentages are no longer shown as if they were real.</p>
+          </section>
         ) : (
-          <div style={{ display: "grid", gap: 14, marginTop: 8 }}>
+          <section style={{ display: "grid", gap: 16 }}>
             {results.map((item) => (
-              <article key={item.course.id} style={panelStyle}>
+              <article key={item.id} style={{ background: "#fff", border: "1px solid #e4e7ec", borderRadius: 17, padding: 20 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 750, color: "#667085", textTransform: "uppercase" }}>
-                      {item.university?.name ?? "Unknown university"}
-                    </div>
-                    <h3 style={{ margin: "6px 0 5px" }}>{item.course.name}</h3>
-                    <div style={{ color: "#586174" }}>
-                      {item.campus?.name ?? "Unknown campus"} · {item.campus?.state ?? "Unknown state"} · {item.campus?.regional ? "Regional" : "Metro"}
-                    </div>
-                  </div>
-
-                  <div style={{ minWidth: 170, padding: 14, borderRadius: 14, background: "#ecfdf5", border: "1px solid #a7f3d0" }}>
-                    <div style={{ fontSize: 13, fontWeight: 750, color: "#166534" }}>DEMO SCHOLARSHIP</div>
-                    <div style={{ fontSize: 30, fontWeight: 850, marginTop: 4 }}>{item.percent}%</div>
-                  </div>
+                  <div><div style={{ color: "#0057b8", fontWeight: 850 }}>{item.university?.name ?? "University not linked"}</div><h2 style={{ margin: "5px 0" }}>{item.name}</h2>{item.eligibility && <p style={{ color: "#667085" }}>{item.eligibility}</p>}</div>
+                  <div style={{ minWidth: 150, padding: 14, borderRadius: 13, background: "#ecfdf3", color: "#027a48" }}>{item.percentage != null ? <strong style={{ fontSize: 28 }}>{item.percentage}%</strong> : <strong>{money(item.amount)}</strong>}</div>
                 </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginTop: 16 }}>
-                  {[
-                    ["Annual tuition", money(item.course.annualTuitionCents)],
-                    ["Annual saving", money(item.annualSavingCents)],
-                    ["Annual after scholarship", money(item.annualAfterScholarshipCents)],
-                    ["Estimated total saving", money(item.totalSavingCents)],
-                  ].map(([label, value]) => (
-                    <div key={label} style={{ border: "1px solid #e2e6ed", borderRadius: 12, padding: 13, background: "#fbfcfe" }}>
-                      <div style={{ fontSize: 12, fontWeight: 750, color: "#667085" }}>{label}</div>
-                      <div style={{ marginTop: 4, fontSize: 18, fontWeight: 800 }}>{value}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-                  <Link href={`/local-v2/courses/${item.course.id}`} style={{ padding: "10px 14px", borderRadius: 10, background: "#111827", color: "#fff", textDecoration: "none", fontWeight: 750 }}>
-                    View course details
-                  </Link>
-                  <Link href={`/local-v2/course-finance?course=${encodeURIComponent(item.course.id)}`} style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #cfd5df", textDecoration: "none", fontWeight: 750 }}>
-                    Check finance impact
-                  </Link>
-                </div>
+                <p><strong>Linked courses:</strong> {item.linkedCourses.length}</p>
+                {item.linkedCourses.slice(0, 8).map((course) => <div key={course.id} style={{ padding: 10, borderTop: "1px solid #eef1f4" }}><strong>{course.name}</strong> · {money(course.annualFee, course.currency)}/year · <Link href={`/local-v2/courses/${course.id}`}>View course</Link></div>)}
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>{item.sourceUrl && <a href={item.sourceUrl} target="_blank" rel="noreferrer">Official scholarship source ↗</a>}{item.university && <Link href={`/local-v2/universities/${item.university.id}`}>University profile</Link>}</div>
               </article>
             ))}
-          </div>
+          </section>
         )}
-      </section>
-
-      <section style={{ ...panelStyle, marginTop: 16, background: "#fff7ed", borderColor: "#fed7aa" }}>
-        <strong>Demo notice:</strong> Scholarship percentages and savings on this page are examples only. Production UniPath will store verified scholarship names, eligibility rules, deadlines, provider sources, effective dates and last-verified timestamps.
-      </section>
+      </div>
     </main>
   );
 }
