@@ -11,6 +11,13 @@ type SearchOption = {
   state?: string;
 };
 
+type SupabaseErrorShape = {
+  message?: string;
+  details?: string;
+  hint?: string;
+  code?: string;
+};
+
 const validTypes = new Set<SearchType>([
   "qualification",
   "study_field",
@@ -38,6 +45,15 @@ function getSupabase() {
       detectSessionInUrl: false,
     },
   });
+}
+
+function getErrorDetail(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const value = error as SupabaseErrorShape;
+    return [value.message, value.details, value.hint, value.code].filter(Boolean).join(" | ") || JSON.stringify(error);
+  }
+  return String(error || "Unknown database search error");
 }
 
 export async function GET(request: NextRequest) {
@@ -76,8 +92,16 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === "occupation") {
-      let query = supabase.from("occupations").select("id,name,code,assessing_authority").order("name").limit(20);
-      if (q) query = query.or(`name.ilike.%${q}%,code.ilike.%${q}%`);
+      let query = supabase
+        .from("occupations")
+        .select("id,name,code,assessing_authority")
+        .order("name")
+        .limit(20);
+
+      if (q) {
+        query = query.ilike("name", `%${q}%`);
+      }
+
       const { data, error } = await query;
       if (error) throw error;
       options = (data ?? []).map((row) => ({
@@ -95,7 +119,7 @@ export async function GET(request: NextRequest) {
         .or("cricos_expired.is.null,cricos_expired.eq.false")
         .order("name")
         .limit(20);
-      if (q) query = query.or(`name.ilike.%${q}%,qualification_level.ilike.%${q}%`);
+      if (q) query = query.ilike("name", `%${q}%`);
       const { data, error } = await query;
       if (error) throw error;
       options = (data ?? []).map((row) => ({
@@ -112,7 +136,7 @@ export async function GET(request: NextRequest) {
         .select("id,name,city,state,postcode")
         .order("city")
         .limit(50);
-      if (q) query = query.or(`city.ilike.%${q}%,name.ilike.%${q}%,state.ilike.%${q}%,postcode.ilike.%${q}%`);
+      if (q) query = query.ilike("city", `%${q}%`);
       const { data, error } = await query;
       if (error) throw error;
 
@@ -134,7 +158,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ options, source: "SUPABASE", type, query: q });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown database search error";
+    const detail = getErrorDetail(error);
     console.error("Quick Match option search failed", detail);
     return NextResponse.json(
       { error: "Unable to search the UniPath database right now.", detail, options: [] },
