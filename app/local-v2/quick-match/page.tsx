@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { clearLocalV2Profile, loadLocalV2Profile, saveLocalV2Profile } from "@/lib/local-v2/profile-storage";
 import { rankCourses } from "@/lib/local-v2/recommendation-engine";
 import type { AustralianState, MigrationImportance, StudentDecisionProfile } from "@/lib/local-v2/types";
 
@@ -35,6 +36,22 @@ export default function QuickMatchPage() {
   const [stage, setStage] = useState<Stage>("quick-input");
   const [resultSource, setResultSource] = useState<ResultSource>("quick");
   const [migrationChoice, setMigrationChoice] = useState<MigrationImportance>("consider");
+  const [storageReady, setStorageReady] = useState(false);
+  const [restoredProfile, setRestoredProfile] = useState(false);
+
+  useEffect(() => {
+    const saved = loadLocalV2Profile();
+    if (saved) {
+      setProfile({ ...initialProfile, ...saved });
+      setRestoredProfile(true);
+    }
+    setStorageReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    saveLocalV2Profile(profile);
+  }, [profile, storageReady]);
 
   const standardResults = useMemo(
     () => rankCourses({ ...profile, migrationImportance: "none" }),
@@ -71,6 +88,15 @@ export default function QuickMatchPage() {
   };
 
   const runMigrationAware = () => setStage("migration-result");
+
+  const resetSavedProfile = () => {
+    clearLocalV2Profile();
+    setProfile(initialProfile);
+    setStage("quick-input");
+    setResultSource("quick");
+    setMigrationChoice("consider");
+    setRestoredProfile(false);
+  };
 
   const ResultCards = ({ migration = false }: { migration?: boolean }) => {
     const results = migration ? topMigration : topStandard;
@@ -111,6 +137,12 @@ export default function QuickMatchPage() {
         <p style={{ color: "#586174", maxWidth: 800 }}>
           This is the first interactive V2 flow. Quick Match gives a fast result, then asks whether the user wants a detailed assessment. After every result, UniPath separately asks whether PR/migration pathways should be considered.
         </p>
+        <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "#eef6ff", border: "1px solid #cfe3ff" }}>
+          <strong>Profile persistence:</strong> {restoredProfile ? "Your previous local profile was restored automatically." : "Your answers are saved automatically in this browser."}
+          <button type="button" onClick={resetSavedProfile} style={{ marginLeft: 12, border: "1px solid #b8c7db", background: "#fff", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>
+            Clear saved profile
+          </button>
+        </div>
       </div>
 
       {stage === "quick-input" && (
@@ -246,7 +278,7 @@ export default function QuickMatchPage() {
             </div>
             <div style={buttonRowStyle}>
               <button type="button" onClick={() => setStage(resultSource === "quick" ? "quick-result" : "detailed-result")} style={secondaryButtonStyle}>Back to result</button>
-              <button type="button" onClick={() => { setProfile(initialProfile); setStage("quick-input"); }} style={primaryButtonStyle}>Start again</button>
+              <button type="button" onClick={resetSavedProfile} style={primaryButtonStyle}>Start again</button>
             </div>
           </section>
         </>
@@ -288,14 +320,14 @@ const sectionStyle = { border: "1px solid #dfe3ea", borderRadius: 18, background
 const cardStyle = { border: "1px solid #e2e6ed", borderRadius: 14, padding: 16, background: "#fbfcfe" } as const;
 const formGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 } as const;
 const labelStyle = { display: "grid", gap: 7, fontWeight: 650 } as const;
-const inputStyle = { width: "100%", border: "1px solid #cfd5df", borderRadius: 10, padding: "10px 12px", fontSize: 16, background: "#fff" } as const;
-const fieldsetStyle = { border: "1px solid #dfe3ea", borderRadius: 12, padding: 12, marginTop: 16 } as const;
-const checkStyle = { display: "flex", gap: 7, alignItems: "center" } as const;
-const primaryButtonStyle = { border: 0, borderRadius: 10, padding: "11px 16px", background: "#173b73", color: "#fff", fontWeight: 750, cursor: "pointer" } as const;
-const secondaryButtonStyle = { border: "1px solid #b9c1ce", borderRadius: 10, padding: "11px 16px", background: "#fff", color: "#1f2937", fontWeight: 700, cursor: "pointer" } as const;
+const inputStyle = { width: "100%", border: "1px solid #cfd5df", borderRadius: 10, padding: "10px 11px", fontSize: 15, background: "#fff" } as const;
+const fieldsetStyle = { border: "1px solid #dfe3ea", borderRadius: 12, padding: 14, marginTop: 16 } as const;
+const checkStyle = { display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600 } as const;
 const buttonRowStyle = { display: "flex", flexWrap: "wrap", gap: 10, marginTop: 20 } as const;
-const scoreGridStyle = { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 14, fontSize: 14 } as const;
-const stepStyle = { fontSize: 12, fontWeight: 800, letterSpacing: ".08em", color: "#48627f" } as const;
-const rankStyle = { display: "inline-block", padding: "4px 8px", borderRadius: 999, background: "#eef4ff", fontWeight: 750, fontSize: 13 } as const;
-const demoBadgeStyle = { display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff0bf", fontWeight: 800, fontSize: 13 } as const;
-const warningStyle = { marginTop: 18, padding: 14, borderRadius: 12, background: "#fff5dc", color: "#704b00" } as const;
+const primaryButtonStyle = { border: 0, borderRadius: 10, background: "#111827", color: "#fff", padding: "11px 16px", fontWeight: 750, cursor: "pointer" } as const;
+const secondaryButtonStyle = { border: "1px solid #cfd5df", borderRadius: 10, background: "#fff", color: "#111827", padding: "11px 16px", fontWeight: 750, cursor: "pointer" } as const;
+const demoBadgeStyle = { display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff2cc", fontWeight: 750 } as const;
+const stepStyle = { color: "#475467", fontSize: 13, fontWeight: 800, letterSpacing: 0.5 } as const;
+const rankStyle = { color: "#344054", fontSize: 13, fontWeight: 800 } as const;
+const scoreGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, margin: "14px 0" } as const;
+const warningStyle = { marginTop: 18, padding: 14, borderRadius: 12, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412" } as const;
