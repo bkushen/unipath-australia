@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-const IN_CHUNK_SIZE = 150;
+const LINK_PAGE_SIZE = 1000;
+const COURSE_SAMPLE_SIZE = 8;
+const COURSE_ID_CHUNK_SIZE = 100;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -12,7 +14,7 @@ function getSupabase() {
 
 const ensureUrl = (value: string | null | undefined) => !value ? null : /^https?:\/\//i.test(value) ? value : `https://${value}`;
 
-function chunks<T>(items: T[], size = IN_CHUNK_SIZE) {
+function chunks<T>(items: T[], size: number) {
   const result: T[][] = [];
   for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
   return result;
@@ -24,53 +26,48 @@ export async function GET(request: NextRequest) {
   const supabase = getSupabase();
 
   try {
-    let query = supabase
+    let scholarshipQuery = supabase
       .from("scholarships")
       .select("id,university_id,name,amount,percentage,eligibility,source_url,verified_at")
       .order("name");
 
-    if (q) query = query.ilike("name", `%${q.replace(/[%_]/g, " ")}%`);
-    if (universityId) query = query.eq("university_id", universityId);
+    if (q) scholarshipQuery = scholarshipQuery.ilike("name", `%${q.replace(/[%_]/g, " ")}%`);
+    if (universityId) scholarshipQuery = scholarshipQuery.eq("university_id", universityId);
 
-    const { data: scholarships, error } = await query;
-    if (error) throw error;
+    const { data: scholarships, error: scholarshipError } = await scholarshipQuery;
+    if (scholarshipError) throw scholarshipError;
 
-    const universityIds = Array.from(new Set((scholarships ?? []).map((item) => item.university_id).filter(Boolean)));
-    const scholarshipIds = (scholarships ?? []).map((item) => item.id);
+    const scholarshipRows = scholarships ?? [];
+    const scholarshipIds = scholarshipRows.map((item) => item.id);
+    const scholarshipIdSet = new Set(scholarshipIds);
+    const universityIds = Array.from(new Set(scholarshipRows.map((item) => item.university_id).filter(Boolean)));
 
-    const [{ data: universities, error: universityError }, linkResponses] = await Promise.all([
-      universityIds.length
-        ? supabase.from("universities").select("id,name,slug,website,logo_url").in("id", universityIds)
-        : Promise.resolve({ data: [], error: null }),
-      scholarshipIds.length
-        ? Promise.all(chunks(scholarshipIds).map((ids) => supabase.from("course_scholarships").select("scholarship_id,course_id").in("scholarship_id", ids)))
-        : Promise.resolve([]),
-    ]);
+    const { data: universities, error: universityError } = universityIds.length
+      ? await supabase.from("universities").select("id,name,slug,website,logo_url").in("id", universityIds)
+      : { data: [], error: null };
     if (universityError) throw universityError;
 
-    const links = linkResponses.flatMap((response) => {
-      if (response.error) throw response.error;
-      return response.data ?? [];
-    });
+    const links: Array<{ scholarship_id: string; course_id: string }> = [];
+    if (scholarshipIds.length) {
+      let from = 0;
+      while (true) {
+        const to = from + LINK_PAGE_SIZE - 1;
+        const { data: linkPage, error: linkError } = await supabase
+          .from("course_scholarships")
+          .select("scholarship_id,course_id")
+          .in("scholarship_id", scholarshipIds)
+          .range(from, to);
+        if (linkError) throw linkError;
 
-    const courseIds = Array.from(new Set(links.map((item) => item.course_id).filter(Boolean)));
-    const courseResponses = courseIds.length
-      ? await Promise.all(chunks(courseIds).map((ids) =>
-          supabase
-            .from("courses")
-            .select("id,name,qualification_level,annual_fee,total_fee,currency,duration_months,official_course_url,cricos_expired")
-            .in("id", ids)
-            .or("cricos_expired.is.null,cricos_expired.eq.false"),
-        ))
-      : [];
+        const rows = linkPage ?? [];
+        for (const row of rows) {
+          if (scholarshipIdSet.has(row.scholarship_id)) links.push(row);
+        }
+        if (rows.length < LINK_PAGE_SIZE) break;
+        from += LINK_PAGE_SIZE;
+      }
+    }
 
-    const courses = courseResponses.flatMap((response) => {
-      if (response.error) throw response.error;
-      return response.data ?? [];
-    });
-
-    const universityMap = new Map((universities ?? []).map((item) => [item.id, item]));
-    const courseMap = new Map(courses.map((item) => [item.id, item]));
     const courseIdsByScholarship = new Map<string, string[]>();
     for (const link of links) {
       const current = courseIdsByScholarship.get(link.scholarship_id) ?? [];
@@ -78,9 +75,39 @@ export async function GET(request: NextRequest) {
       courseIdsByScholarship.set(link.scholarship_id, current);
     }
 
-    const results = (scholarships ?? []).map((item) => {
+    const sampledCourseIds = Array.from(new Set(
+      scholarshipRows.flatMap((item) => (courseIdsByScholarship.get(item.id) ?? []).slice(0, COURSE_SAMPLE_SIZE)),
+    ));
+
+    const courses: Array<{
+      id: string;
+      name: string;
+      qualification_level: string | null;
+      annual_fee: number | string | null;
+      total_fee: number | string | null;
+      currency: string | null;
+      duration_months: number | null;
+      official_course_url: string | null;
+      cricos_expired: boolean | null;
+    }> = [];
+
+    for (const ids of chunks(sampledCourseIds, COURSE_ID_CHUNK_SIZE)) {
+      const { data: courseRows, error: courseError } = await supabase
+        .from("courses")
+        .select("id,name,qualification_level,annual_fee,total_fee,currency,duration_months,official_course_url,cricos_expired")
+        .in("id", ids);
+      if (courseError) throw courseError;
+      courses.push(...(courseRows ?? []));
+    }
+
+    const universityMap = new Map((universities ?? []).map((item) => [item.id, item]));
+    const courseMap = new Map(courses.filter((item) => item.cricos_expired !== true).map((item) => [item.id, item]));
+
+    const results = scholarshipRows.map((item) => {
       const university = universityMap.get(item.university_id);
-      const linkedCourses = (courseIdsByScholarship.get(item.id) ?? []).map((id) => courseMap.get(id)).filter(Boolean);
+      const allLinkedCourseIds = courseIdsByScholarship.get(item.id) ?? [];
+      const linkedCourseSamples = allLinkedCourseIds.slice(0, COURSE_SAMPLE_SIZE).map((id) => courseMap.get(id)).filter(Boolean);
+
       return {
         id: item.id,
         name: item.name,
@@ -89,6 +116,7 @@ export async function GET(request: NextRequest) {
         eligibility: item.eligibility,
         sourceUrl: ensureUrl(item.source_url),
         verifiedAt: item.verified_at,
+        linkedCourseCount: allLinkedCourseIds.length,
         university: university ? {
           id: university.id,
           name: university.name,
@@ -96,7 +124,7 @@ export async function GET(request: NextRequest) {
           website: ensureUrl(university.website),
           logoUrl: ensureUrl(university.logo_url),
         } : null,
-        linkedCourses: linkedCourses.map((course) => ({
+        linkedCourses: linkedCourseSamples.map((course) => ({
           id: course!.id,
           name: course!.name,
           qualificationLevel: course!.qualification_level,
