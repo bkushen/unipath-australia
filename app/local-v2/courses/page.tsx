@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type CatalogueCourse = {
   id: string;
@@ -45,6 +45,7 @@ type CatalogueResponse = {
   totalPages?: number;
   hasPreviousPage?: boolean;
   hasNextPage?: boolean;
+  qualificationOptions?: string[];
   error?: string;
   detail?: string;
 };
@@ -59,6 +60,7 @@ export default function CoursesPage() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [courses, setCourses] = useState<CatalogueCourse[]>([]);
+  const [qualificationOptions, setQualificationOptions] = useState<string[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -68,6 +70,7 @@ export default function CoursesPage() {
   const [regionalOnly, setRegionalOnly] = useState(false);
   const [qualification, setQualification] = useState("ALL");
   const [maxAnnualFee, setMaxAnnualFee] = useState(80000);
+  const [debouncedMaxAnnualFee, setDebouncedMaxAnnualFee] = useState(80000);
   const [sort, setSort] = useState("name");
 
   useEffect(() => {
@@ -79,17 +82,41 @@ export default function CoursesPage() {
   }, [query]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedMaxAnnualFee(maxAnnualFee);
+      setPage(1);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [maxAnnualFee]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [state, regionalOnly, qualification, sort]);
+
+  useEffect(() => {
     const controller = new AbortController();
     const load = async () => {
       setLoading(true);
       setError("");
       try {
-        const response = await fetch(`/api/local-v2/courses?q=${encodeURIComponent(debouncedQuery)}&page=${page}&pageSize=${PAGE_SIZE}`, { signal: controller.signal });
+        const params = new URLSearchParams({
+          q: debouncedQuery,
+          page: String(page),
+          pageSize: String(PAGE_SIZE),
+          sort,
+          maxAnnualFee: String(debouncedMaxAnnualFee),
+        });
+        if (state !== "ALL") params.set("state", state);
+        if (regionalOnly) params.set("regional", "true");
+        if (qualification !== "ALL") params.set("qualification", qualification);
+
+        const response = await fetch(`/api/local-v2/courses?${params.toString()}`, { signal: controller.signal });
         const data = (await response.json()) as CatalogueResponse;
         if (!response.ok) throw new Error(data.detail || data.error || "Unable to load courses.");
         setCourses(data.courses ?? []);
         setTotal(data.total ?? 0);
         setTotalPages(data.totalPages ?? 1);
+        setQualificationOptions(data.qualificationOptions ?? []);
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           setError((err as Error).message);
@@ -102,30 +129,7 @@ export default function CoursesPage() {
     };
     load();
     return () => controller.abort();
-  }, [debouncedQuery, page]);
-
-  const qualifications = useMemo(() => [
-    "ALL",
-    ...Array.from(new Set(courses.map((course) => course.qualificationLevel).filter((value): value is string => Boolean(value)))).sort(),
-  ], [courses]);
-
-  const filteredCourses = useMemo(() => {
-    const filtered = courses.filter((course) => {
-      const campuses = course.campuses ?? [];
-      const matchesState = state === "ALL" || campuses.some((campus) => campus.state === state);
-      const matchesRegional = !regionalOnly || campuses.some((campus) => campus.regional);
-      const matchesQualification = qualification === "ALL" || course.qualificationLevel === qualification;
-      const matchesFee = course.annualFee == null || course.annualFee <= maxAnnualFee;
-      return matchesState && matchesRegional && matchesQualification && matchesFee;
-    });
-
-    return [...filtered].sort((a, b) => {
-      if (sort === "fee-low") return (a.annualFee ?? Number.MAX_SAFE_INTEGER) - (b.annualFee ?? Number.MAX_SAFE_INTEGER);
-      if (sort === "fee-high") return (b.annualFee ?? -1) - (a.annualFee ?? -1);
-      if (sort === "university") return (a.university?.name ?? "").localeCompare(b.university?.name ?? "");
-      return a.name.localeCompare(b.name);
-    });
-  }, [courses, state, regionalOnly, qualification, maxAnnualFee, sort]);
+  }, [debouncedQuery, page, state, regionalOnly, qualification, debouncedMaxAnnualFee, sort]);
 
   const clearFilters = () => {
     setQuery("");
@@ -133,6 +137,7 @@ export default function CoursesPage() {
     setRegionalOnly(false);
     setQualification("ALL");
     setMaxAnnualFee(80000);
+    setDebouncedMaxAnnualFee(80000);
     setSort("name");
     setPage(1);
   };
@@ -151,7 +156,7 @@ export default function CoursesPage() {
         <div style={heroInnerStyle}>
           <div style={eyebrowStyle}>UNIPATH AUSTRALIA · FULL LIVE COURSE DATABASE</div>
           <h1 style={heroTitleStyle}>Search courses across Australia</h1>
-          <p style={heroTextStyle}>Browse the complete UniPath course database. Results are loaded 100 at a time so thousands of courses stay fast and searchable.</p>
+          <p style={heroTextStyle}>Browse the complete UniPath course database. Search and filters now run across the full catalogue, while results load 100 at a time for speed.</p>
 
           <div style={searchShellStyle}>
             <span style={{ fontSize: 20 }}>⌕</span>
@@ -177,11 +182,23 @@ export default function CoursesPage() {
       <div style={contentGridStyle}>
         <aside style={filterPanelStyle}>
           <div style={filterHeaderStyle}><strong>Filters</strong><button type="button" onClick={clearFilters} style={resetButtonStyle}>Clear all</button></div>
-          <FilterGroup title="Qualification level"><select value={qualification} onChange={(event) => setQualification(event.target.value)} style={controlStyle}>{qualifications.map((item) => <option key={item} value={item}>{item === "ALL" ? "All levels" : item}</option>)}</select></FilterGroup>
-          <FilterGroup title="State"><select value={state} onChange={(event) => setState(event.target.value)} style={controlStyle}>{states.map((item) => <option key={item} value={item}>{item === "ALL" ? "All states" : item}</option>)}</select></FilterGroup>
+          <FilterGroup title="Qualification level">
+            <select value={qualification} onChange={(event) => setQualification(event.target.value)} style={controlStyle}>
+              <option value="ALL">All levels</option>
+              {qualificationOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </FilterGroup>
+          <FilterGroup title="State">
+            <select value={state} onChange={(event) => setState(event.target.value)} style={controlStyle}>
+              {states.map((item) => <option key={item} value={item}>{item === "ALL" ? "All states" : item}</option>)}
+            </select>
+          </FilterGroup>
           <FilterGroup title="Study location"><label style={checkRowStyle}><input type="checkbox" checked={regionalOnly} onChange={(event) => setRegionalOnly(event.target.checked)} /> Regional only</label></FilterGroup>
-          <FilterGroup title="Maximum annual tuition"><input type="range" min="20000" max="80000" step="1000" value={maxAnnualFee} onChange={(event) => setMaxAnnualFee(Number(event.target.value))} style={{ width: "100%" }} /><div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, color: "#475467", fontSize: 13 }}><span>A$20k</span><strong>{money(maxAnnualFee)}</strong></div></FilterGroup>
-          <div style={filterNoteStyle}>All matching records are available through pagination. State, regional, qualification and fee filters currently apply to the loaded 100-course page; we can move these to server-side filtering next.</div>
+          <FilterGroup title="Maximum annual tuition">
+            <input type="range" min="20000" max="80000" step="1000" value={maxAnnualFee} onChange={(event) => setMaxAnnualFee(Number(event.target.value))} style={{ width: "100%" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, color: "#475467", fontSize: 13 }}><span>A$20k</span><strong>{money(maxAnnualFee)}</strong></div>
+          </FilterGroup>
+          <div style={filterNoteStyle}>These filters apply to the complete Supabase catalogue, not just the 100 records currently shown.</div>
         </aside>
 
         <section>
@@ -190,15 +207,15 @@ export default function CoursesPage() {
               <div style={resultCountStyle}>{loading ? "Loading courses…" : `${total.toLocaleString()} course${total === 1 ? "" : "s"} found`}</div>
               <div style={resultSubtextStyle}>{!loading && total > 0 ? `Showing ${firstItem.toLocaleString()}–${lastItem.toLocaleString()} · Page ${page} of ${totalPages.toLocaleString()}` : "Supabase-backed UniPath catalogue"}</div>
             </div>
-            <label style={sortWrapStyle}><span>Sort current page by</span><select value={sort} onChange={(event) => setSort(event.target.value)} style={sortStyle}><option value="name">Course name</option><option value="university">University</option><option value="fee-low">Lowest fee</option><option value="fee-high">Highest fee</option></select></label>
+            <label style={sortWrapStyle}><span>Sort by</span><select value={sort} onChange={(event) => setSort(event.target.value)} style={sortStyle}><option value="name">Course name</option><option value="fee-low">Lowest fee</option><option value="fee-high">Highest fee</option></select></label>
           </div>
 
           {error && <div style={errorStyle}><strong>Couldn’t load the catalogue.</strong><div style={{ marginTop: 5 }}>{error}</div></div>}
 
-          {!loading && !error && filteredCourses.length === 0 ? (
-            <div style={emptyStyle}><h2 style={{ marginTop: 0 }}>No courses on this page match these filters</h2><p style={{ color: "#667085" }}>Try another page or clear the page filters.</p><button type="button" onClick={clearFilters} style={primaryButtonStyle}>Clear filters</button></div>
+          {!loading && !error && courses.length === 0 ? (
+            <div style={emptyStyle}><h2 style={{ marginTop: 0 }}>No courses match these filters</h2><p style={{ color: "#667085" }}>Try another keyword, state, qualification or fee range.</p><button type="button" onClick={clearFilters} style={primaryButtonStyle}>Clear filters</button></div>
           ) : (
-            <div style={{ display: "grid", gap: 16 }}>{filteredCourses.map((course) => <CourseCard key={course.id} course={course} />)}</div>
+            <div style={{ display: "grid", gap: 16 }}>{courses.map((course) => <CourseCard key={course.id} course={course} />)}</div>
           )}
 
           {!loading && !error && totalPages > 1 && (
