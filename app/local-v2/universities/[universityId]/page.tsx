@@ -71,7 +71,7 @@ export default async function UniversityDetailPage({ params }: { params: Promise
   const states = Array.from(new Set((campuses ?? []).map((campus) => campus.state).filter((value): value is string => Boolean(value)))).sort();
   const website = ensureUrl(university.website);
   const logoUrl = ensureUrl(university.logo_url);
-  const initials = university.name.split(/\s+/).filter(Boolean).slice(0, 3).map((word) => word[0]).join("").toUpperCase();
+  const initials = university.name.split(/\s+/).filter(Boolean).slice(0, 3).map((word: string) => word[0]).join("").toUpperCase();
 
   return (
     <main style={pageStyle}>
