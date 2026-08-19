@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { CurrencyBudgetInput } from "@/components/local-v2/CurrencyBudgetInput";
 import { clearLocalV2Profile, loadLocalV2Profile, saveLocalV2Profile } from "@/lib/local-v2/profile-storage";
 import { rankCourses } from "@/lib/local-v2/recommendation-engine";
-import type { AustralianState, MigrationImportance, StudentDecisionProfile } from "@/lib/local-v2/types";
+import type { AustralianState, MigrationImportance, ScholarshipImportance, StudentDecisionProfile } from "@/lib/local-v2/types";
 
 const states: AustralianState[] = ["VIC", "NSW", "QLD", "SA", "WA", "TAS", "ACT", "NT"];
 const money = (cents: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(cents / 100);
@@ -16,6 +15,9 @@ const initialProfile: StudentDecisionProfile = {
   qualificationField: "Information Technology",
   desiredOccupation: "Software Engineer",
   annualTuitionBudgetCents: 4000000,
+  semesterTuitionBudgetCents: 2000000,
+  fullCourseBudgetCents: 8000000,
+  scholarshipImportance: "prefer",
   totalFundsCents: 12000000,
   preferredStates: ["VIC"],
   regionalAccepted: true,
@@ -74,331 +76,246 @@ export default function QuickMatchPage() {
     setRestoredProfile(false);
   };
 
+  const updateSemesterBudget = (semesterTuitionBudgetCents: number) => {
+    setProfile((current) => ({
+      ...current,
+      semesterTuitionBudgetCents,
+      annualTuitionBudgetCents: semesterTuitionBudgetCents * 2,
+    }));
+  };
+
   const ResultCards = ({ migration = false }: { migration?: boolean }) => {
     const results = migration ? topMigration : topStandard;
     return (
-      <div style={{ display: "grid", gap: 16 }}>
-        {results.map((item, index) => (
-          <article key={item.course.id} style={resultCardStyle}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}>
-              <div>
-                <div style={resultEyebrowStyle}>{index === 0 ? "Best match" : `Alternative ${index}`}</div>
-                <h3 style={{ margin: "7px 0 4px", fontSize: 22 }}>{item.course.name}</h3>
-                <p style={{ margin: 0, fontWeight: 700 }}>{item.university.name}</p>
-                <p style={{ margin: "4px 0 0", color: "#5f6573" }}>{item.campus.name} · {item.campus.state}</p>
+      <div style={{ display: "grid", gap: 14 }}>
+        {results.map((item, index) => {
+          const semesterFee = Math.round(item.course.annualTuitionCents / 2);
+          const fullCourseFee = Math.round(item.course.annualTuitionCents * item.course.durationYears);
+          const scholarshipPercent = item.course.scholarshipPercent ?? 0;
+          const scholarshipSaving = Math.round(fullCourseFee * scholarshipPercent / 100);
+          const afterScholarship = fullCourseFee - scholarshipSaving;
+          return (
+            <article key={item.course.id} style={cardStyle}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                <div>
+                  <div style={rankStyle}>#{index + 1} {index === 0 ? "Best match" : "Alternative"}</div>
+                  <h3 style={{ margin: "8px 0 4px" }}>{item.course.name}</h3>
+                  <p style={{ margin: 0 }}>{item.university.name}</p>
+                  <p style={{ margin: "3px 0 0", color: "#586174" }}>{item.campus.name} · {item.campus.state}</p>
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 800 }}>{item.scores.overall}%</div>
               </div>
-              <div style={scoreBubbleStyle}>{item.scores.overall}%</div>
-            </div>
 
-            <div style={scoreGridStyle}>
-              <span>Academic <strong>{item.scores.academic}%</strong></span>
-              <span>Career <strong>{item.scores.career}%</strong></span>
-              <span>Budget <strong>{item.scores.affordability}%</strong></span>
-              <span>Location <strong>{item.scores.location}%</strong></span>
-              <span>Jobs <strong>{item.scores.labourMarket}%</strong></span>
-              <span>Migration <strong>{item.scores.migration}%</strong></span>
-            </div>
+              <div style={feeGridStyle}>
+                <div><span style={feeLabelStyle}>1 semester</span><strong>{money(semesterFee)}</strong></div>
+                <div><span style={feeLabelStyle}>Full course</span><strong>{money(fullCourseFee)}</strong></div>
+                <div><span style={feeLabelStyle}>Scholarship</span><strong>{scholarshipPercent}%</strong></div>
+                <div><span style={feeLabelStyle}>After scholarship</span><strong>{money(afterScholarship)}</strong></div>
+              </div>
+              {scholarshipPercent > 0 && <div style={savingStyle}>Estimated scholarship saving: {money(scholarshipSaving)}</div>}
 
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 12, paddingTop: 14, borderTop: "1px solid #e8e8ef" }}>
-              <div><strong>{money(item.course.annualTuitionCents)}</strong> <span style={{ color: "#687080" }}>/ year demo tuition</span></div>
-              <Link href={`/local-v2/courses/${item.course.id}`} style={textLinkStyle}>Explore details →</Link>
-            </div>
-          </article>
-        ))}
+              <div style={scoreGridStyle}>
+                <span>Academic <strong>{item.scores.academic}%</strong></span>
+                <span>Career <strong>{item.scores.career}%</strong></span>
+                <span>Budget <strong>{item.scores.affordability}%</strong></span>
+                <span>Location <strong>{item.scores.location}%</strong></span>
+                <span>Jobs <strong>{item.scores.labourMarket}%</strong></span>
+                <span>Migration <strong>{item.scores.migration}%</strong></span>
+              </div>
+            </article>
+          );
+        })}
       </div>
     );
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#fff" }}>
-      <header style={siteHeaderStyle}>
-        <div style={navInnerStyle}>
-          <Link href="/local-v2" style={brandStyle}>
-            <span style={brandMarkStyle}>U</span>
-            <span>UniPath Australia</span>
-          </Link>
-          <nav style={navLinksStyle}>
-            <Link href="/local-v2/courses" style={navLinkStyle}>Courses</Link>
-            <Link href="/local-v2/universities" style={navLinkStyle}>Universities</Link>
-            <Link href="/local-v2/compare" style={navLinkStyle}>Compare</Link>
-            <Link href="/local-v2/course-finance" style={navLinkStyle}>Costs</Link>
-            <Link href="/local-v2/dashboard" style={navLinkStyle}>Saved</Link>
-          </nav>
+    <main style={pageStyle}>
+      <header style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
+          <span style={demoBadgeStyle}>Demo version · live currency conversion</span>
+          <button type="button" onClick={resetSavedProfile} style={tinyButtonStyle}>Clear saved answers</button>
         </div>
+        <h1 style={{ margin: "18px 0 8px", fontSize: 40, lineHeight: 1.1 }}>Find your best course in Australia</h1>
+        <p style={{ color: "#e7efff", maxWidth: 760, fontSize: 17, lineHeight: 1.55, margin: 0 }}>
+          Compare course fit, university options, locations, scholarships and study costs in one guided search.
+        </p>
+        <div style={saveNoticeStyle}>✓ {restoredProfile ? "Your previous answers were restored." : "Your answers are saved automatically in this browser."}</div>
       </header>
 
-      <section style={heroStyle}>
-        <div style={heroInnerStyle}>
-          <div style={{ maxWidth: 760 }}>
-            <span style={heroBadgeStyle}>Course matching made simple</span>
-            <h1 style={heroTitleStyle}>Find the right Australian course for your goals</h1>
-            <p style={heroTextStyle}>
-              Compare study options around your career, budget, location and future plans. Start with a quick match and refine it whenever you’re ready.
-            </p>
-          </div>
-          <div style={heroStatsStyle}>
-            <div><strong>6</strong><span>demo courses</span></div>
-            <div><strong>5</strong><span>demo universities</span></div>
-            <div><strong>Live</strong><span>AUD conversion</span></div>
-          </div>
-        </div>
-      </section>
+      {stage === "quick-input" && (
+        <div style={mainGridStyle}>
+          <aside style={journeyStyle}>
+            <div style={journeyTitleStyle}>Your matching journey</div>
+            <JourneyStep number="1" title="Quick Match" active />
+            <JourneyStep number="2" title="Your Matches" />
+            <JourneyStep number="3" title="Detailed Assessment" />
+            <JourneyStep number="4" title="Migration-aware options" />
+          </aside>
 
-      <main style={pageStyle}>
-        <div style={topUtilityStyle}>
-          <div style={{ color: "#5d6270", fontSize: 14 }}>
-            {restoredProfile ? "✓ Your previous answers were restored" : "✓ Your answers save automatically in this browser"}
-          </div>
-          <button type="button" onClick={resetSavedProfile} style={clearButtonStyle}>Clear saved answers</button>
-        </div>
+          <section style={sectionStyle}>
+            <div style={progressWrapStyle}>
+              <div style={{ fontWeight: 800 }}>Step 1 of 4</div>
+              <div style={progressTrackStyle}><div style={{ ...progressFillStyle, width: "25%" }} /></div>
+            </div>
+            <h2 style={{ margin: "0 0 6px", fontSize: 28 }}>Quick Match</h2>
+            <p style={mutedStyle}>Start with the essentials. You can add more details after seeing your first recommendations.</p>
 
-        {stage === "quick-input" && (
-          <div style={contentGridStyle}>
-            <aside style={sidebarStyle}>
-              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 16 }}>Your matching journey</div>
-              {[
-                ["1", "Quick Match", "Active"],
-                ["2", "Quick Result", "Next"],
-                ["3", "Detailed Match", "Optional"],
-                ["4", "Migration View", "Optional"],
-              ].map(([number, label, status], index) => (
-                <div key={number} style={{ ...stepRowStyle, ...(index === 0 ? activeStepRowStyle : {}) }}>
-                  <span style={{ ...stepNumberStyle, ...(index === 0 ? activeStepNumberStyle : {}) }}>{number}</span>
-                  <div><strong>{label}</strong><div style={stepStatusStyle}>{status}</div></div>
+            <div style={subsectionStyle}>
+              <div style={subsectionHeaderStyle}><span style={subsectionIconStyle}>1</span><div><strong>Study goal</strong><div style={helperStyle}>Tell us your current study background and the career you want.</div></div></div>
+              <div style={formGridStyle}>
+                <label style={labelStyle}>Highest qualification
+                  <select value={profile.highestQualification} onChange={(e) => setProfile({ ...profile, highestQualification: e.target.value })} style={inputStyle}>
+                    <option>Bachelor</option><option>Diploma</option><option>Master</option><option>High School</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>Previous study field
+                  <select value={profile.qualificationField} onChange={(e) => setProfile({ ...profile, qualificationField: e.target.value })} style={inputStyle}>
+                    <option>Information Technology</option><option>Engineering</option><option>Business</option><option>Health</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>Career goal
+                  <select value={profile.desiredOccupation} onChange={(e) => setProfile({ ...profile, desiredOccupation: e.target.value })} style={inputStyle}>
+                    <option>Software Engineer</option><option>Software Developer</option><option>Data Scientist</option><option>Cyber Security Analyst</option><option>ICT Business Analyst</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div style={subsectionStyle}>
+              <div style={subsectionHeaderStyle}><span style={subsectionIconStyle}>2</span><div><strong>Study budget</strong><div style={helperStyle}>We use both your semester affordability and your total course budget.</div></div></div>
+              <div style={budgetGridStyle}>
+                <div style={budgetCardStyle}>
+                  <CurrencyBudgetInput label="Budget for one semester" audCents={profile.semesterTuitionBudgetCents ?? profile.annualTuitionBudgetCents / 2} onAudCentsChange={updateSemesterBudget} />
+                  <div style={budgetHintStyle}>Used to check whether the course is realistically payable semester by semester.</div>
                 </div>
-              ))}
-              <div style={sidebarTipStyle}>
-                <strong>Why Quick Match?</strong>
-                <p style={{ margin: "6px 0 0" }}>It takes only a few details to create your first ranked shortlist.</p>
-              </div>
-            </aside>
-
-            <section>
-              <div style={{ marginBottom: 22 }}>
-                <div style={sectionEyebrowStyle}>STEP 1 · QUICK MATCH</div>
-                <h2 style={{ margin: "7px 0 6px", fontSize: 31 }}>Tell us what matters to you</h2>
-                <p style={{ margin: 0, color: "#626877", fontSize: 16 }}>You can change these answers later. Nothing here locks you into a choice.</p>
-              </div>
-
-              <div style={questionCardStyle}>
-                <h3 style={questionTitleStyle}>Your study goal</h3>
-                <p style={questionHelpStyle}>Tell us about your current education and the career you want to work towards.</p>
-                <div style={formGridStyle}>
-                  <label style={labelStyle}>Highest qualification
-                    <select value={profile.highestQualification} onChange={(e) => setProfile({ ...profile, highestQualification: e.target.value })} style={inputStyle}>
-                      <option>Bachelor</option><option>Diploma</option><option>Master</option><option>High School</option>
-                    </select>
-                  </label>
-                  <label style={labelStyle}>Study field
-                    <select value={profile.qualificationField} onChange={(e) => setProfile({ ...profile, qualificationField: e.target.value })} style={inputStyle}>
-                      <option>Information Technology</option><option>Engineering</option><option>Business</option><option>Health</option>
-                    </select>
-                  </label>
-                  <label style={labelStyle}>Career goal
-                    <select value={profile.desiredOccupation} onChange={(e) => setProfile({ ...profile, desiredOccupation: e.target.value })} style={inputStyle}>
-                      <option>Software Engineer</option><option>Software Developer</option><option>Data Scientist</option><option>Cyber Security Analyst</option><option>ICT Business Analyst</option>
-                    </select>
-                  </label>
+                <div style={budgetCardStyle}>
+                  <CurrencyBudgetInput label="Maximum full course budget" audCents={profile.fullCourseBudgetCents ?? profile.annualTuitionBudgetCents * 2} onAudCentsChange={(fullCourseBudgetCents) => setProfile((current) => ({ ...current, fullCourseBudgetCents }))} />
+                  <div style={budgetHintStyle}>Used to compare the total tuition across the complete course duration.</div>
                 </div>
               </div>
 
-              <div style={questionCardStyle}>
-                <h3 style={questionTitleStyle}>Your tuition budget</h3>
-                <p style={questionHelpStyle}>Enter the amount in your own currency. UniPath converts it to AUD using the latest available daily rate.</p>
-                <div style={{ maxWidth: 540 }}>
-                  <CurrencyBudgetInput
-                    label="Annual tuition budget"
-                    audCents={profile.annualTuitionBudgetCents}
-                    onAudCentsChange={(annualTuitionBudgetCents) => setProfile((current) => ({ ...current, annualTuitionBudgetCents }))}
-                  />
-                </div>
-              </div>
-
-              <div style={questionCardStyle}>
-                <h3 style={questionTitleStyle}>Where would you like to study?</h3>
-                <p style={questionHelpStyle}>Select as many states as you like. Leaving more options open can improve your matches.</p>
-                <div style={{ fontWeight: 750, marginBottom: 10 }}>Preferred state(s)</div>
+              <div style={{ marginTop: 18 }}>
+                <div style={{ fontWeight: 800, marginBottom: 9 }}>How important is a scholarship?</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 9 }}>
-                  {states.map((state) => {
-                    const selected = profile.preferredStates.includes(state);
-                    return (
-                      <button key={state} type="button" onClick={() => updateState(state)} aria-pressed={selected} style={{ ...statePillStyle, ...(selected ? selectedStatePillStyle : {}) }}>
-                        {selected ? "✓ " : ""}{state}
-                      </button>
-                    );
+                  {([
+                    ["high", "Very important"],
+                    ["prefer", "Prefer if available"],
+                    ["none", "Not important"],
+                  ] as [ScholarshipImportance, string][]).map(([value, label]) => {
+                    const selected = (profile.scholarshipImportance ?? "prefer") === value;
+                    return <button key={value} type="button" onClick={() => setProfile({ ...profile, scholarshipImportance: value })} style={{ ...choicePillStyle, ...(selected ? selectedChoicePillStyle : {}) }}>{selected ? "✓ " : ""}{label}</button>;
                   })}
                 </div>
+                <div style={helperStyle}>UniPath will later match course and university scholarships from the database and show the estimated saving automatically.</div>
+              </div>
+            </div>
 
-                <div style={{ marginTop: 22, fontWeight: 750, marginBottom: 10 }}>Open to regional study?</div>
+            <div style={{ ...subsectionStyle, marginBottom: 0 }}>
+              <div style={subsectionHeaderStyle}><span style={subsectionIconStyle}>3</span><div><strong>Location preferences</strong><div style={helperStyle}>Choose one or more states. You can leave this flexible.</div></div></div>
+              <div style={{ fontWeight: 700, marginBottom: 10 }}>Preferred state(s)</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 9 }}>
+                {states.map((state) => {
+                  const selected = profile.preferredStates.includes(state);
+                  return <button key={state} type="button" onClick={() => updateState(state)} style={{ ...statePillStyle, ...(selected ? selectedStatePillStyle : {}) }}>{selected ? "✓ " : ""}{state}</button>;
+                })}
+              </div>
+
+              <div style={{ marginTop: 20 }}>
+                <div style={{ fontWeight: 700, marginBottom: 10 }}>Open to regional study?</div>
                 <div style={{ display: "flex", gap: 9 }}>
                   <button type="button" onClick={() => setProfile({ ...profile, regionalAccepted: true })} style={{ ...choicePillStyle, ...(profile.regionalAccepted ? selectedChoicePillStyle : {}) }}>Yes</button>
                   <button type="button" onClick={() => setProfile({ ...profile, regionalAccepted: false })} style={{ ...choicePillStyle, ...(!profile.regionalAccepted ? selectedChoicePillStyle : {}) }}>No</button>
                 </div>
               </div>
+            </div>
 
-              <div style={actionPanelStyle}>
-                <div>
-                  <strong style={{ display: "block", fontSize: 18 }}>Ready to see your matches?</strong>
-                  <span style={{ color: "#656b78" }}>You’ll get ranked courses, universities, state fit and affordability.</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setProfile((current) => ({ ...current, mode: "quick", migrationImportance: "none" })); setResultSource("quick"); setStage("quick-result"); }}
-                  style={ctaButtonStyle}
-                >
-                  Show my matches →
-                </button>
-              </div>
-            </section>
+            <div style={benefitBoxStyle}>
+              <strong>What you’ll get</strong>
+              <div style={benefitGridStyle}><span>✓ Top course matches</span><span>✓ Semester affordability</span><span>✓ Full course cost</span><span>✓ Scholarship estimate</span><span>✓ University options</span><span>✓ Best-fit states</span></div>
+            </div>
+
+            <button type="button" onClick={() => { setProfile((current) => ({ ...current, mode: "quick", migrationImportance: "none" })); setResultSource("quick"); setStage("quick-result"); }} style={ctaButtonStyle}>Show My Quick Result →</button>
+          </section>
+        </div>
+      )}
+
+      {stage === "quick-result" && (
+        <>
+          <section style={sectionStyle}><div style={stepStyle}>STEP 2 · QUICK RESULT</div><h2>Your quick matches</h2><ResultCards /></section>
+          <section style={{ ...sectionStyle, marginTop: 16 }}><h2>Want a more detailed result?</h2><p>We’ll keep your answers and only ask for the extra details needed to improve your recommendation.</p><div style={buttonRowStyle}><button type="button" onClick={() => setStage("detailed-input")} style={primaryButtonStyle}>Yes, improve my result</button><button type="button" onClick={() => setResultSource("quick")} style={secondaryButtonStyle}>Keep Quick Result</button></div></section>
+          <MigrationPrompt onContinue={() => setStage("migration-result")} migrationChoice={migrationChoice} setMigrationChoice={setMigrationChoice} source="Quick Result" />
+        </>
+      )}
+
+      {stage === "detailed-input" && (
+        <section style={sectionStyle}>
+          <div style={stepStyle}>STEP 3 · DETAILED ASSESSMENT</div><h2>Improve your recommendation</h2><p>Your Quick Match answers are retained. Add more information below.</p>
+          <div style={formGridStyle}>
+            <CurrencyBudgetInput label="Total funds available" audCents={profile.totalFundsCents} onAudCentsChange={(totalFundsCents) => setProfile((current) => ({ ...current, totalFundsCents }))} />
+            <label style={labelStyle}>Years of relevant experience<input type="number" min={0} max={40} step={0.5} value={profile.yearsExperience ?? 0} onChange={(e) => setProfile({ ...profile, yearsExperience: Number(e.target.value) })} style={inputStyle} /></label>
+            <label style={labelStyle}>Skills<input value={(profile.skills ?? []).join(", ")} onChange={(e) => setProfile({ ...profile, skills: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })} style={inputStyle} placeholder="software, web, databases" /></label>
+            <label style={labelStyle}>Dependants<input type="number" min={0} max={10} value={profile.dependants ?? 0} onChange={(e) => setProfile({ ...profile, dependants: Number(e.target.value) })} style={inputStyle} /></label>
+            <label style={labelStyle}>Transport preference<select value={profile.transportPreference} onChange={(e) => setProfile({ ...profile, transportPreference: e.target.value as StudentDecisionProfile["transportPreference"] })} style={inputStyle}><option value="either">Either</option><option value="car">Car</option><option value="public_transport">Public transport</option></select></label>
           </div>
-        )}
+          <div style={buttonRowStyle}><button type="button" onClick={() => { setProfile((current) => ({ ...current, mode: "detailed", migrationImportance: "none" })); setResultSource("detailed"); setStage("detailed-result"); }} style={primaryButtonStyle}>Get Detailed Result</button><button type="button" onClick={() => setStage("quick-result")} style={secondaryButtonStyle}>Back</button></div>
+        </section>
+      )}
 
-        {stage === "quick-result" && (
-          <>
-            <section style={resultSectionStyle}>
-              <div style={sectionEyebrowStyle}>STEP 2 · QUICK RESULT</div>
-              <h2 style={{ margin: "7px 0 6px", fontSize: 31 }}>Your best course matches</h2>
-              <p style={{ margin: "0 0 20px", color: "#626877" }}>Ranked using your current education, career goal, budget and location preferences.</p>
-              <ResultCards />
-            </section>
-            <section style={secondaryPanelStyle}>
-              <h2 style={{ marginTop: 0 }}>Want a more detailed result?</h2>
-              <p>We’ll keep your current answers and only ask for the extra details needed to improve your recommendation.</p>
-              <div style={buttonRowStyle}>
-                <button type="button" onClick={() => setStage("detailed-input")} style={primaryButtonStyle}>Improve my result</button>
-                <button type="button" onClick={() => setResultSource("quick")} style={secondaryButtonStyle}>Keep Quick Result</button>
-              </div>
-            </section>
-            <MigrationPrompt onContinue={() => setStage("migration-result")} migrationChoice={migrationChoice} setMigrationChoice={setMigrationChoice} source="Quick Result" />
-          </>
-        )}
+      {stage === "detailed-result" && <><section style={sectionStyle}><div style={stepStyle}>STEP 4 · DETAILED RESULT</div><h2>Your detailed matches</h2><ResultCards /></section><MigrationPrompt onContinue={() => setStage("migration-result")} migrationChoice={migrationChoice} setMigrationChoice={setMigrationChoice} source="Detailed Result" /></>}
 
-        {stage === "detailed-input" && (
-          <section style={resultSectionStyle}>
-            <div style={sectionEyebrowStyle}>STEP 3 · DETAILED MATCH</div>
-            <h2 style={{ margin: "7px 0 6px", fontSize: 31 }}>Improve your recommendation</h2>
-            <p style={{ color: "#626877" }}>Your Quick Match answers are retained. Add a little more information below.</p>
-            <div style={{ ...formGridStyle, marginTop: 22 }}>
-              <CurrencyBudgetInput label="Total funds available" audCents={profile.totalFundsCents} onAudCentsChange={(totalFundsCents) => setProfile((current) => ({ ...current, totalFundsCents }))} />
-              <label style={labelStyle}>Years of relevant experience
-                <input type="number" min={0} max={40} step={0.5} value={profile.yearsExperience ?? 0} onChange={(e) => setProfile({ ...profile, yearsExperience: Number(e.target.value) })} style={inputStyle} />
-              </label>
-              <label style={labelStyle}>Skills
-                <input value={(profile.skills ?? []).join(", ")} onChange={(e) => setProfile({ ...profile, skills: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })} style={inputStyle} placeholder="software, web, databases" />
-              </label>
-              <label style={labelStyle}>Dependants
-                <input type="number" min={0} max={10} value={profile.dependants ?? 0} onChange={(e) => setProfile({ ...profile, dependants: Number(e.target.value) })} style={inputStyle} />
-              </label>
-              <label style={labelStyle}>Transport preference
-                <select value={profile.transportPreference} onChange={(e) => setProfile({ ...profile, transportPreference: e.target.value as StudentDecisionProfile["transportPreference"] })} style={inputStyle}>
-                  <option value="either">Either</option><option value="car">Car</option><option value="public_transport">Public transport</option>
-                </select>
-              </label>
-            </div>
-            <div style={buttonRowStyle}>
-              <button type="button" onClick={() => { setProfile((current) => ({ ...current, mode: "detailed", migrationImportance: "none" })); setResultSource("detailed"); setStage("detailed-result"); }} style={primaryButtonStyle}>Show detailed matches</button>
-              <button type="button" onClick={() => setStage("quick-result")} style={secondaryButtonStyle}>Back</button>
-            </div>
-          </section>
-        )}
-
-        {stage === "detailed-result" && (
-          <>
-            <section style={resultSectionStyle}>
-              <div style={sectionEyebrowStyle}>DETAILED RESULT</div>
-              <h2 style={{ margin: "7px 0 6px", fontSize: 31 }}>Your refined matches</h2>
-              <p style={{ margin: "0 0 20px", color: "#626877" }}>These rankings now include your additional profile information.</p>
-              <ResultCards />
-            </section>
-            <MigrationPrompt onContinue={() => setStage("migration-result")} migrationChoice={migrationChoice} setMigrationChoice={setMigrationChoice} source="Detailed Result" />
-          </>
-        )}
-
-        {stage === "migration-result" && (
-          <section style={resultSectionStyle}>
-            <div style={sectionEyebrowStyle}>OPTIONAL MIGRATION VIEW</div>
-            <h2 style={{ margin: "7px 0 6px", fontSize: 31 }}>Original vs migration-aware matches</h2>
-            <p style={{ color: "#626877" }}>Your original result stays unchanged. Migration-aware ranking is shown separately.</p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, marginTop: 22 }}>
-              <div><h3>Original recommendation</h3><ResultCards /></div>
-              <div><h3>Migration-aware recommendation</h3><ResultCards migration /></div>
-            </div>
-            <div style={warningStyle}>Migration values on this local page are DEMO scoring fixtures only. They are not current Australian migration rules, legal advice or a PR guarantee.</div>
-            <div style={buttonRowStyle}>
-              <button type="button" onClick={() => setStage(resultSource === "quick" ? "quick-result" : "detailed-result")} style={secondaryButtonStyle}>Back to result</button>
-              <button type="button" onClick={resetSavedProfile} style={primaryButtonStyle}>Start again</button>
-            </div>
-          </section>
-        )}
-      </main>
-    </div>
+      {stage === "migration-result" && <section style={sectionStyle}><div style={stepStyle}>FINAL STEP · MIGRATION-AWARE COMPARISON</div><h2>Original vs migration-aware result</h2><p>UniPath keeps the original {resultSource === "quick" ? "Quick" : "Detailed"} Result and creates a separate migration-aware ranking.</p><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}><div><h3>Original recommendation</h3><ResultCards /></div><div><h3>Migration-aware recommendation</h3><ResultCards migration /></div></div><div style={warningStyle}>Migration values on this local page are DEMO scoring fixtures only. They are not current Australian migration rules, legal advice or a PR guarantee.</div><div style={buttonRowStyle}><button type="button" onClick={() => setStage(resultSource === "quick" ? "quick-result" : "detailed-result")} style={secondaryButtonStyle}>Back to result</button><button type="button" onClick={resetSavedProfile} style={primaryButtonStyle}>Start again</button></div></section>}
+    </main>
   );
+}
+
+function JourneyStep({ number, title, active = false }: { number: string; title: string; active?: boolean }) {
+  return <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", opacity: active ? 1 : 0.62 }}><span style={{ ...journeyNumberStyle, ...(active ? journeyNumberActiveStyle : {}) }}>{number}</span><span style={{ fontWeight: active ? 800 : 650 }}>{title}</span></div>;
 }
 
 function MigrationPrompt({ onContinue, migrationChoice, setMigrationChoice, source }: { onContinue: () => void; migrationChoice: MigrationImportance; setMigrationChoice: (value: MigrationImportance) => void; source: string; }) {
-  return (
-    <section style={secondaryPanelStyle}>
-      <div style={sectionEyebrowStyle}>OPTIONAL · MIGRATION PATHWAYS</div>
-      <h2 style={{ margin: "7px 0 8px" }}>Would you like migration pathways considered too?</h2>
-      <p style={{ color: "#626877" }}>We’ll keep your {source} unchanged and create a separate migration-aware comparison.</p>
-      <div style={{ maxWidth: 520, marginTop: 16 }}>
-        <label style={labelStyle}>How important is this to you?
-          <select value={migrationChoice} onChange={(e) => setMigrationChoice(e.target.value as MigrationImportance)} style={inputStyle}>
-            <option value="consider">Consider it, but keep course and career quality important</option>
-            <option value="high">Very important</option>
-            <option value="none">Not important</option>
-          </select>
-        </label>
-      </div>
-      {migrationChoice !== "none" && <button type="button" onClick={onContinue} style={{ ...primaryButtonStyle, marginTop: 18 }}>Show migration-aware comparison</button>}
-    </section>
-  );
+  return <section style={{ ...sectionStyle, marginTop: 16 }}><div style={stepStyle}>OPTIONAL · PR / MIGRATION PATHWAY</div><h2>Would you like UniPath to consider potential PR / migration pathways?</h2><p>We’ll keep your {source} unchanged and create a separate migration-aware comparison.</p><div style={formGridStyle}><label style={labelStyle}>How important is this to you?<select value={migrationChoice} onChange={(e) => setMigrationChoice(e.target.value as MigrationImportance)} style={inputStyle}><option value="consider">Consider it, but keep career/course quality important</option><option value="high">Very important</option><option value="none">Not important</option></select></label></div>{migrationChoice === "none" ? <p style={{ color: "#586174" }}>No migration-aware re-ranking will be applied.</p> : <button type="button" onClick={onContinue} style={primaryButtonStyle}>Show Migration-Aware Result</button>}</section>;
 }
 
-const siteHeaderStyle = { borderBottom: "1px solid #e4e4ea", background: "#fff", position: "sticky", top: 0, zIndex: 10 } as const;
-const navInnerStyle = { maxWidth: 1180, margin: "0 auto", padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 20 } as const;
-const brandStyle = { display: "flex", gap: 10, alignItems: "center", color: "#172033", textDecoration: "none", fontWeight: 850, fontSize: 18 } as const;
-const brandMarkStyle = { width: 34, height: 34, borderRadius: 10, background: "#3557b7", color: "#fff", display: "grid", placeItems: "center", fontWeight: 900 } as const;
-const navLinksStyle = { display: "flex", flexWrap: "wrap", gap: 20, alignItems: "center" } as const;
-const navLinkStyle = { color: "#32394b", textDecoration: "none", fontSize: 14, fontWeight: 700 } as const;
-const heroStyle = { background: "#3d5db5", color: "#fff" } as const;
-const heroInnerStyle = { maxWidth: 1180, margin: "0 auto", padding: "48px 20px 44px", display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 34, alignItems: "end" } as const;
-const heroBadgeStyle = { display: "inline-block", padding: "7px 11px", borderRadius: 999, background: "rgba(255,255,255,0.16)", fontSize: 13, fontWeight: 800 } as const;
-const heroTitleStyle = { margin: "16px 0 12px", maxWidth: 740, fontSize: 44, lineHeight: 1.08, letterSpacing: -0.7 } as const;
-const heroTextStyle = { margin: 0, maxWidth: 720, fontSize: 18, lineHeight: 1.6, color: "rgba(255,255,255,0.9)" } as const;
-const heroStatsStyle = { display: "grid", gridTemplateColumns: "repeat(3, minmax(90px, 1fr))", gap: 1, borderRadius: 14, overflow: "hidden", background: "rgba(255,255,255,0.2)" } as const;
-const pageStyle = { maxWidth: 1180, margin: "0 auto", padding: "24px 20px 70px" } as const;
-const topUtilityStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 22, paddingBottom: 18, borderBottom: "1px solid #ececf1" } as const;
-const clearButtonStyle = { border: 0, background: "transparent", color: "#3557b7", fontWeight: 750, cursor: "pointer" } as const;
-const contentGridStyle = { display: "grid", gridTemplateColumns: "240px minmax(0, 1fr)", gap: 34, alignItems: "start" } as const;
-const sidebarStyle = { border: "1px solid #e1e2e8", borderRadius: 14, padding: 16, position: "sticky", top: 82, background: "#fff" } as const;
-const stepRowStyle = { display: "flex", gap: 11, alignItems: "center", padding: "11px 8px", borderRadius: 10, color: "#686e7b" } as const;
-const activeStepRowStyle = { background: "#f1f4ff", color: "#1e2a4a" } as const;
-const stepNumberStyle = { width: 28, height: 28, borderRadius: 999, display: "grid", placeItems: "center", background: "#eff0f3", fontWeight: 800, fontSize: 13, flex: "0 0 auto" } as const;
-const activeStepNumberStyle = { background: "#3557b7", color: "#fff" } as const;
-const stepStatusStyle = { fontSize: 12, marginTop: 2, fontWeight: 500 } as const;
-const sidebarTipStyle = { marginTop: 16, padding: 13, borderRadius: 10, background: "#f8f8fb", color: "#555c6b", fontSize: 13, lineHeight: 1.45 } as const;
-const sectionEyebrowStyle = { color: "#3557b7", fontSize: 13, fontWeight: 850, letterSpacing: 0.4 } as const;
-const questionCardStyle = { borderTop: "1px solid #e8e8ee", padding: "24px 0" } as const;
-const questionTitleStyle = { margin: 0, fontSize: 21 } as const;
-const questionHelpStyle = { margin: "6px 0 17px", color: "#687080", lineHeight: 1.5 } as const;
-const formGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 } as const;
-const labelStyle = { display: "grid", gap: 7, fontWeight: 750, color: "#252c3d" } as const;
-const inputStyle = { width: "100%", border: "1px solid #cfd2da", borderRadius: 8, padding: "12px 12px", fontSize: 15, background: "#fff", color: "#202633" } as const;
-const statePillStyle = { border: "1px solid #cfd2da", background: "#fff", color: "#303747", borderRadius: 8, padding: "10px 14px", fontWeight: 750, cursor: "pointer" } as const;
-const selectedStatePillStyle = { background: "#eaf0ff", color: "#24449c", borderColor: "#6681ce" } as const;
-const choicePillStyle = { border: "1px solid #cfd2da", background: "#fff", borderRadius: 8, padding: "10px 20px", fontWeight: 750, cursor: "pointer" } as const;
-const selectedChoicePillStyle = { background: "#eaf0ff", borderColor: "#6681ce", color: "#24449c" } as const;
-const actionPanelStyle = { marginTop: 12, padding: 20, borderRadius: 12, background: "#f4f6fb", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18, flexWrap: "wrap" } as const;
-const ctaButtonStyle = { border: 0, borderRadius: 8, background: "#e52c58", color: "#fff", padding: "13px 19px", fontSize: 16, fontWeight: 850, cursor: "pointer", whiteSpace: "nowrap" } as const;
-const resultSectionStyle = { maxWidth: 900, margin: "0 auto", padding: "18px 0 0" } as const;
-const resultCardStyle = { border: "1px solid #dedfe5", borderRadius: 12, padding: 20, background: "#fff" } as const;
-const resultEyebrowStyle = { color: "#3557b7", fontSize: 13, fontWeight: 850 } as const;
-const scoreBubbleStyle = { minWidth: 64, height: 64, borderRadius: 999, background: "#eef2ff", color: "#2746a0", display: "grid", placeItems: "center", fontSize: 20, fontWeight: 900 } as const;
-const scoreGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, margin: "16px 0", color: "#5d6473", fontSize: 14 } as const;
-const textLinkStyle = { color: "#3557b7", fontWeight: 800, textDecoration: "none" } as const;
-const secondaryPanelStyle = { maxWidth: 900, margin: "18px auto 0", border: "1px solid #e0e1e7", borderRadius: 12, padding: 20, background: "#fafafd" } as const;
-const buttonRowStyle = { display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 } as const;
-const primaryButtonStyle = { border: 0, borderRadius: 8, background: "#3557b7", color: "#fff", padding: "11px 16px", fontWeight: 800, cursor: "pointer" } as const;
-const secondaryButtonStyle = { border: "1px solid #cfd2da", borderRadius: 8, background: "#fff", color: "#282f40", padding: "11px 16px", fontWeight: 800, cursor: "pointer" } as const;
-const warningStyle = { marginTop: 18, padding: 14, borderRadius: 10, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412" } as const;
+const pageStyle = { maxWidth: 1180, margin: "0 auto", padding: "30px 20px 70px", background: "#0057b8", minHeight: "100vh" } as const;
+const mainGridStyle = { display: "grid", gridTemplateColumns: "240px minmax(0, 1fr)", gap: 22, alignItems: "start" } as const;
+const journeyStyle = { borderRadius: 20, background: "#fff", padding: 20, position: "sticky", top: 20, boxShadow: "0 8px 30px rgba(16,24,40,0.08)" } as const;
+const journeyTitleStyle = { fontWeight: 850, marginBottom: 8, fontSize: 15 } as const;
+const journeyNumberStyle = { width: 28, height: 28, borderRadius: 999, border: "1px solid #cbd5e1", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13 } as const;
+const journeyNumberActiveStyle = { background: "#0057b8", color: "#fff", borderColor: "#0057b8" } as const;
+const sectionStyle = { border: "1px solid #dfe3ea", borderRadius: 22, background: "#fff", padding: 26, boxShadow: "0 8px 30px rgba(16,24,40,0.08)" } as const;
+const subsectionStyle = { borderTop: "1px solid #eef1f5", paddingTop: 24, marginTop: 24, marginBottom: 24 } as const;
+const subsectionHeaderStyle = { display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 16 } as const;
+const subsectionIconStyle = { display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: 999, background: "#0057b8", color: "#fff", fontWeight: 800, flex: "0 0 auto" } as const;
+const formGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 14 } as const;
+const budgetGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 } as const;
+const budgetCardStyle = { border: "1px solid #dce4ee", borderRadius: 16, padding: 16, background: "#f9fbfd" } as const;
+const budgetHintStyle = { color: "#667085", fontSize: 12, lineHeight: 1.45, marginTop: 10 } as const;
+const labelStyle = { display: "grid", gap: 7, fontWeight: 700 } as const;
+const inputStyle = { width: "100%", border: "1px solid #cfd5df", borderRadius: 10, padding: "12px 12px", fontSize: 15, background: "#fff" } as const;
+const statePillStyle = { border: "1px solid #cfd5df", background: "#fff", color: "#344054", borderRadius: 8, padding: "10px 15px", fontWeight: 750, cursor: "pointer" } as const;
+const selectedStatePillStyle = { background: "#0057b8", color: "#fff", borderColor: "#0057b8" } as const;
+const choicePillStyle = { border: "1px solid #cfd5df", background: "#fff", borderRadius: 8, padding: "10px 15px", fontWeight: 750, cursor: "pointer" } as const;
+const selectedChoicePillStyle = { background: "#eaf3ff", borderColor: "#73aaf5", color: "#004594" } as const;
+const benefitBoxStyle = { marginTop: 24, padding: 18, borderRadius: 14, background: "#f3f7fb", border: "1px solid #dce7f4" } as const;
+const benefitGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 10, color: "#475467" } as const;
+const ctaButtonStyle = { width: "100%", marginTop: 20, border: 0, borderRadius: 8, background: "#d81b60", color: "#fff", padding: "15px 18px", fontSize: 17, fontWeight: 850, cursor: "pointer" } as const;
+const progressWrapStyle = { display: "grid", gridTemplateColumns: "auto minmax(120px, 1fr)", gap: 14, alignItems: "center", marginBottom: 22, color: "#475467" } as const;
+const progressTrackStyle = { height: 8, borderRadius: 999, background: "#e9edf2", overflow: "hidden" } as const;
+const progressFillStyle = { height: "100%", borderRadius: 999, background: "#0057b8" } as const;
+const saveNoticeStyle = { display: "inline-block", marginTop: 14, padding: "8px 11px", borderRadius: 8, background: "#e8f7ef", color: "#0f6a42", fontSize: 13, fontWeight: 700 } as const;
+const tinyButtonStyle = { border: "1px solid rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.12)", borderRadius: 8, padding: "7px 10px", cursor: "pointer", color: "#fff" } as const;
+const mutedStyle = { color: "#667085", margin: 0, lineHeight: 1.55 } as const;
+const helperStyle = { color: "#667085", fontSize: 13, marginTop: 3, fontWeight: 500 } as const;
+const cardStyle = { border: "1px solid #e2e6ed", borderRadius: 14, padding: 18, background: "#fbfcfe" } as const;
+const feeGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, margin: "16px 0 10px" } as const;
+const feeLabelStyle = { display: "block", color: "#667085", fontSize: 12, marginBottom: 3 } as const;
+const savingStyle = { display: "inline-block", background: "#ecfdf3", color: "#027a48", padding: "7px 9px", borderRadius: 8, fontSize: 13, fontWeight: 750 } as const;
+const buttonRowStyle = { display: "flex", flexWrap: "wrap", gap: 10, marginTop: 20 } as const;
+const primaryButtonStyle = { border: 0, borderRadius: 8, background: "#0057b8", color: "#fff", padding: "11px 16px", fontWeight: 750, cursor: "pointer" } as const;
+const secondaryButtonStyle = { border: "1px solid #cfd5df", borderRadius: 8, background: "#fff", color: "#111827", padding: "11px 16px", fontWeight: 750, cursor: "pointer" } as const;
+const demoBadgeStyle = { display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff", color: "#0057b8", fontWeight: 800, fontSize: 13 } as const;
+const stepStyle = { color: "#475467", fontSize: 13, fontWeight: 800, letterSpacing: 0.5 } as const;
+const rankStyle = { color: "#344054", fontSize: 13, fontWeight: 800 } as const;
+const scoreGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, margin: "14px 0" } as const;
+const warningStyle = { marginTop: 18, padding: 14, borderRadius: 12, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412" } as const;
