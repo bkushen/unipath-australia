@@ -1,174 +1,213 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import Link from "next/link";
-import { demoCourses, demoCampuses } from "@/lib/local-v2/fixtures";
+import { useEffect, useMemo, useState } from "react";
 
-const panel = {
-  border: "1px solid #dfe3ea",
-  borderRadius: 16,
-  padding: 18,
-  background: "#fff",
-} as const;
+type Program = {
+  id: string;
+  subclass: string | null;
+  name: string;
+  stream: string | null;
+  pathwayType: string | null;
+  sourceUrl: string | null;
+  verifiedAt: string | null;
+  linkedOccupationCount?: number;
+};
 
-const inputStyle = {
-  width: "100%",
-  border: "1px solid #cfd5df",
-  borderRadius: 10,
-  padding: "10px 12px",
-  background: "#fff",
-} as const;
+type LinkedCourse = {
+  id: string;
+  name: string;
+  qualificationLevel: string | null;
+  cricosCode: string | null;
+  durationMonths: number | null;
+  annualFee: number | null;
+  currency: string;
+  officialCourseUrl: string | null;
+  evidenceBasis: string | null;
+  confidence: string | null;
+  notes: string | null;
+  sourceUrl: string | null;
+  verifiedAt: string | null;
+  university: { id: string; name: string; website: string | null; logoUrl: string | null } | null;
+};
 
-const demoPathways = [
-  {
-    id: "skilled-independent-demo",
-    name: "Skilled Independent pathway (Demo)",
-    type: "Points-tested skilled migration",
-    states: ["VIC", "NSW", "QLD", "SA"],
-    regionalPreferred: false,
-    summary: "Illustrative pathway card showing how UniPath can connect an occupation, skills assessment and points-based migration planning.",
-  },
-  {
-    id: "state-nominated-demo",
-    name: "State Nominated pathway (Demo)",
-    type: "State or territory nomination",
-    states: ["VIC", "NSW", "QLD", "SA"],
-    regionalPreferred: false,
-    summary: "Illustrative pathway card for state nomination. Production data must be verified against current state criteria and occupation requirements.",
-  },
-  {
-    id: "regional-demo",
-    name: "Regional skilled pathway (Demo)",
-    type: "Regional nomination / sponsorship",
-    states: ["VIC", "SA"],
-    regionalPreferred: true,
-    summary: "Illustrative pathway card showing how regional study and location preferences could affect recommendation ranking.",
-  },
-  {
-    id: "employer-demo",
-    name: "Employer Sponsored pathway (Demo)",
-    type: "Employer sponsorship",
-    states: ["VIC", "NSW", "QLD", "SA"],
-    regionalPreferred: false,
-    summary: "Illustrative employer-sponsored option. Real eligibility depends on occupation, employer, experience and current visa rules.",
-  },
-];
+type Occupation = {
+  id: string;
+  name: string;
+  assessingAuthority: string | null;
+  sourceUrl: string | null;
+  verifiedAt: string | null;
+  anzscoCodes: string[];
+  lists: string[];
+  programs: Program[];
+  linkedCourses: LinkedCourse[];
+};
+
+type MigrationResponse = {
+  occupations?: Occupation[];
+  programs?: Program[];
+  error?: string;
+  detail?: string;
+};
+
+const money = (value: number | null, currency = "AUD") => value == null ? "Fee not loaded" : new Intl.NumberFormat("en-AU", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
+const date = (value: string | null) => value ? new Intl.DateTimeFormat("en-AU", { dateStyle: "medium" }).format(new Date(value)) : "Verification date not loaded";
 
 export default function MigrationExplorerPage() {
-  const occupations = useMemo(
-    () => [...new Set(demoCourses.flatMap((course) => course.occupations))].sort(),
-    [],
-  );
+  const [occupations, setOccupations] = useState<Occupation[]>([]);
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [occupationId, setOccupationId] = useState("");
+  const [query, setQuery] = useState("");
+  const [regionalOnly, setRegionalOnly] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const [occupation, setOccupation] = useState(occupations[0] ?? "Software Engineer");
-  const [state, setState] = useState("ANY");
-  const [regional, setRegional] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch("/api/local-v2/migration", { signal: controller.signal });
+        const data = await response.json() as MigrationResponse;
+        if (!response.ok) throw new Error(data.detail || data.error || "Unable to load migration data.");
+        const nextOccupations = data.occupations ?? [];
+        setOccupations(nextOccupations);
+        setPrograms(data.programs ?? []);
+        setOccupationId((current) => current || nextOccupations[0]?.id || "");
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") setError((err as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+    return () => controller.abort();
+  }, []);
 
-  const linkedCourses = useMemo(
-    () => demoCourses.filter((course) => course.occupations.includes(occupation)),
-    [occupation],
-  );
+  const selectedOccupation = occupations.find((item) => item.id === occupationId) ?? null;
+  const visibleOccupations = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return occupations;
+    return occupations.filter((item) => [item.name, ...item.anzscoCodes, ...item.lists].some((value) => value.toLowerCase().includes(needle)));
+  }, [occupations, query]);
 
-  const pathways = useMemo(
-    () => demoPathways.filter((pathway) => {
-      if (state !== "ANY" && !pathway.states.includes(state)) return false;
-      if (regional && !pathway.regionalPreferred) return false;
-      return true;
-    }),
-    [state, regional],
-  );
-
-  const avgAlignment = linkedCourses.length
-    ? Math.round(linkedCourses.reduce((sum, course) => sum + course.migrationAlignmentScore, 0) / linkedCourses.length)
-    : 0;
+  const visiblePrograms = useMemo(() => {
+    const base = selectedOccupation?.programs ?? programs;
+    if (!regionalOnly) return base;
+    return base.filter((program) => /regional/i.test(`${program.name} ${program.stream ?? ""} ${program.pathwayType ?? ""}`));
+  }, [selectedOccupation, programs, regionalOnly]);
 
   return (
-    <main style={{ maxWidth: 1050, margin: "0 auto", padding: "32px 18px 70px", background: "#f6f8fb", minHeight: "100vh" }}>
-      <div style={{ marginBottom: 22 }}>
-        <span style={{ display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff2cc", fontWeight: 750 }}>
-          LOCAL DEMO MIGRATION DATA
-        </span>
-        <h1 style={{ marginBottom: 8 }}>Migration Pathway Explorer</h1>
-        <p style={{ color: "#586174", maxWidth: 820 }}>
-          Explore how a selected occupation, state and regional preference could connect to migration-aware planning. This page uses demo logic only and does not determine visa eligibility or guarantee permanent residency.
-        </p>
+    <main style={pageStyle}>
+      <section style={heroStyle}>
+        <div style={heroInnerStyle}>
+          <div style={eyebrowStyle}>UNIPATH AUSTRALIA · VERIFIED MIGRATION DATA</div>
+          <h1 style={heroTitleStyle}>Migration Pathway Explorer</h1>
+          <p style={heroTextStyle}>Explore stored skilled occupations, occupation lists and migration program connections. UniPath does not determine visa eligibility and does not guarantee permanent residency.</p>
+        </div>
+      </section>
+
+      <div style={contentStyle}>
+        {error && <div style={errorStyle}><strong>Couldn&apos;t load migration data.</strong><div style={{ marginTop: 5 }}>{error}</div></div>}
+
+        <section style={summaryGridStyle}>
+          <Stat label="Skilled occupations" value={loading ? "…" : String(occupations.length)} />
+          <Stat label="Migration program records" value={loading ? "…" : String(programs.length)} />
+          <Stat label="Selected occupation programs" value={selectedOccupation ? String(selectedOccupation.programs.length) : "—"} />
+          <Stat label="Course evidence links" value={selectedOccupation ? String(selectedOccupation.linkedCourses.length) : "—"} />
+        </section>
+
+        <section style={panelStyle}>
+          <h2 style={sectionTitleStyle}>Choose a skilled occupation</h2>
+          <div style={controlsStyle}>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search occupation, ANZSCO code or list" style={inputStyle} />
+            <select value={occupationId} onChange={(event) => setOccupationId(event.target.value)} style={inputStyle}>
+              {visibleOccupations.map((occupation) => <option key={occupation.id} value={occupation.id}>{occupation.name}{occupation.anzscoCodes.length ? ` · ${occupation.anzscoCodes.join(", ")}` : ""}</option>)}
+            </select>
+            <label style={checkStyle}><input type="checkbox" checked={regionalOnly} onChange={(event) => setRegionalOnly(event.target.checked)} /> Regional pathways only</label>
+          </div>
+        </section>
+
+        {selectedOccupation && <>
+          <section style={panelStyle}>
+            <div style={headingRowStyle}>
+              <div>
+                <div style={blueLabelStyle}>SKILLED OCCUPATION</div>
+                <h2 style={{ margin: "5px 0" }}>{selectedOccupation.name}</h2>
+                <div style={mutedStyle}>Verified {date(selectedOccupation.verifiedAt)}</div>
+              </div>
+              {selectedOccupation.sourceUrl && <a href={selectedOccupation.sourceUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle}>Official occupation source ↗</a>}
+            </div>
+            <div style={summaryGridStyle}>
+              <Stat label="ANZSCO" value={selectedOccupation.anzscoCodes.join(", ") || "Not loaded"} />
+              <Stat label="Occupation lists" value={selectedOccupation.lists.join(", ") || "Not loaded"} />
+              <Stat label="Assessing authority" value={selectedOccupation.assessingAuthority || "Not loaded"} />
+              <Stat label="Linked programs" value={String(selectedOccupation.programs.length)} />
+            </div>
+          </section>
+
+          <section style={{ marginTop: 16 }}>
+            <div style={headingRowStyle}><h2 style={sectionTitleStyle}>Migration program connections</h2><span style={mutedStyle}>{visiblePrograms.length} program{visiblePrograms.length === 1 ? "" : "s"}</span></div>
+            {visiblePrograms.length === 0 ? <div style={emptyStyle}>No stored program connection matches the current filter.</div> : <div style={cardGridStyle}>{visiblePrograms.map((program) => <article key={program.id} style={cardStyle}>
+              <div style={blueLabelStyle}>{program.pathwayType || "Migration program"}</div>
+              <h3 style={{ margin: "6px 0" }}>{program.subclass ? `Subclass ${program.subclass} · ` : ""}{program.name}</h3>
+              {program.stream && <p style={mutedStyle}>{program.stream}</p>}
+              <div style={mutedStyle}>Verified {date(program.verifiedAt)}</div>
+              {program.sourceUrl && <a href={program.sourceUrl} target="_blank" rel="noreferrer" style={textLinkStyle}>Official Home Affairs source ↗</a>}
+            </article>)}</div>}
+          </section>
+
+          <section style={{ ...panelStyle, marginTop: 16 }}>
+            <div style={headingRowStyle}><h2 style={sectionTitleStyle}>Courses with stored occupation evidence</h2><span style={mutedStyle}>{selectedOccupation.linkedCourses.length} linked course{selectedOccupation.linkedCourses.length === 1 ? "" : "s"}</span></div>
+            {selectedOccupation.linkedCourses.length === 0 ? <p style={mutedStyle}>No course-to-skilled-occupation evidence has been loaded for this occupation yet. UniPath does not infer a migration outcome from the occupation list alone.</p> : <div style={{ display: "grid", gap: 12 }}>{selectedOccupation.linkedCourses.map((course) => <article key={course.id} style={miniCardStyle}>
+              <div style={headingRowStyle}>
+                <div><div style={blueLabelStyle}>{course.university?.name ?? "University not linked"}</div><h3 style={{ margin: "5px 0" }}>{course.name}</h3><div style={mutedStyle}>{course.qualificationLevel || "Qualification not loaded"}{course.cricosCode ? ` · CRICOS ${course.cricosCode}` : ""}</div></div>
+                <div style={{ fontWeight: 850 }}>{money(course.annualFee, course.currency)}/year</div>
+              </div>
+              {course.evidenceBasis && <p style={bodyStyle}><strong>Evidence basis:</strong> {course.evidenceBasis}</p>}
+              <p style={mutedStyle}><strong>Confidence:</strong> {course.confidence || "Not stated"}</p>
+              <div style={actionsStyle}><Link href={`/local-v2/courses/${course.id}`} style={primaryLinkStyle}>View course</Link>{course.officialCourseUrl && <a href={course.officialCourseUrl} target="_blank" rel="noreferrer" style={secondaryLinkStyle}>Official course page ↗</a>}{course.sourceUrl && <a href={course.sourceUrl} target="_blank" rel="noreferrer" style={secondaryLinkStyle}>Evidence source ↗</a>}</div>
+            </article>)}</div>}
+          </section>
+        </>}
+
+        <section style={warningStyle}>
+          <strong>Important migration notice:</strong> Occupation lists and visa programs can change. These records show stored, source-dated connections only. Eligibility depends on current law and program rules, skills assessment, age, English, points, work experience, nomination or sponsorship requirements, and the student&apos;s personal circumstances. A course or occupation appearing here is not a PR guarantee.
+        </section>
       </div>
-
-      <section style={panel}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-          <label style={{ display: "grid", gap: 7, fontWeight: 650 }}>
-            Occupation
-            <select value={occupation} onChange={(e) => setOccupation(e.target.value)} style={inputStyle}>
-              {occupations.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-
-          <label style={{ display: "grid", gap: 7, fontWeight: 650 }}>
-            Preferred state
-            <select value={state} onChange={(e) => setState(e.target.value)} style={inputStyle}>
-              <option value="ANY">Anywhere</option>
-              <option value="VIC">Victoria</option>
-              <option value="NSW">New South Wales</option>
-              <option value="QLD">Queensland</option>
-              <option value="SA">South Australia</option>
-            </select>
-          </label>
-
-          <label style={{ display: "flex", alignItems: "center", gap: 9, fontWeight: 650, marginTop: 28 }}>
-            <input type="checkbox" checked={regional} onChange={(e) => setRegional(e.target.checked)} />
-            Regional pathways only
-          </label>
-        </div>
-      </section>
-
-      <section style={{ ...panel, marginTop: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Occupation summary</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-          <div><strong>Occupation</strong><div>{occupation}</div></div>
-          <div><strong>Linked demo courses</strong><div>{linkedCourses.length}</div></div>
-          <div><strong>Average migration-alignment demo score</strong><div>{avgAlignment}/100</div></div>
-        </div>
-      </section>
-
-      <section style={{ marginTop: 16, display: "grid", gap: 14 }}>
-        {pathways.length === 0 ? (
-          <div style={{ ...panel, background: "#fff7ed", borderColor: "#fed7aa" }}>
-            No demo pathway card matches these filters. Change the state or regional preference.
-          </div>
-        ) : pathways.map((pathway) => (
-          <article key={pathway.id} style={panel}>
-            <div style={{ fontSize: 13, textTransform: "uppercase", color: "#667085", fontWeight: 750 }}>{pathway.type}</div>
-            <h2 style={{ margin: "6px 0 8px" }}>{pathway.name}</h2>
-            <p style={{ color: "#4b5563" }}>{pathway.summary}</p>
-            <p><strong>Demo states:</strong> {pathway.states.join(", ")}</p>
-            <p><strong>Regional focus:</strong> {pathway.regionalPreferred ? "Yes" : "No"}</p>
-          </article>
-        ))}
-      </section>
-
-      <section style={{ ...panel, marginTop: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Courses connected to {occupation}</h2>
-        {linkedCourses.length === 0 ? <p>No demo courses currently link to this occupation.</p> : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {linkedCourses.map((course) => {
-              const campus = demoCampuses.find((item) => item.id === course.campusId);
-              return (
-                <div key={course.id} style={{ border: "1px solid #e2e6ed", borderRadius: 12, padding: 14, background: "#fbfcfe" }}>
-                  <strong>{course.name}</strong>
-                  <div style={{ color: "#586174", marginTop: 4 }}>
-                    {campus?.state ?? "Unknown state"} · Migration alignment {course.migrationAlignmentScore}/100
-                  </div>
-                  <Link href={`/local-v2/courses/${course.id}`} style={{ display: "inline-block", marginTop: 8 }}>View course</Link>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section style={{ ...panel, marginTop: 16, background: "#fff7ed", borderColor: "#fed7aa" }}>
-        <strong>Important:</strong> This is a product-flow prototype only. Real migration information must later come from current, verified official sources and should be source-dated. UniPath must never present a pathway score as guaranteed visa or PR eligibility.
-      </section>
     </main>
   );
 }
+
+function Stat({ label, value }: { label: string; value: string }) { return <div style={statStyle}><div style={smallLabelStyle}>{label}</div><strong>{value}</strong></div>; }
+
+const pageStyle = { minHeight: "100vh", background: "#f5f7fa", color: "#101828" } as const;
+const heroStyle = { background: "#0057b8", color: "#fff", padding: "42px 20px 32px" } as const;
+const heroInnerStyle = { maxWidth: 1120, margin: "0 auto" } as const;
+const eyebrowStyle = { fontSize: 12, fontWeight: 850, letterSpacing: .8 } as const;
+const heroTitleStyle = { fontSize: 42, margin: "10px 0" } as const;
+const heroTextStyle = { maxWidth: 830, color: "#e8f0fb", lineHeight: 1.55, fontSize: 17 } as const;
+const contentStyle = { maxWidth: 1120, margin: "0 auto", padding: "24px 20px 70px" } as const;
+const panelStyle = { background: "#fff", border: "1px solid #e4e7ec", borderRadius: 16, padding: 20, marginTop: 16 } as const;
+const summaryGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12, marginTop: 16 } as const;
+const statStyle = { background: "#fff", border: "1px solid #e4e7ec", borderRadius: 13, padding: 15 } as const;
+const smallLabelStyle = { fontSize: 11, color: "#667085", fontWeight: 850, textTransform: "uppercase", letterSpacing: .35, marginBottom: 5 } as const;
+const sectionTitleStyle = { margin: 0 } as const;
+const controlsStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12, marginTop: 14 } as const;
+const inputStyle = { width: "100%", border: "1px solid #d0d5dd", borderRadius: 10, padding: "11px 12px", background: "#fff" } as const;
+const checkStyle = { display: "flex", alignItems: "center", gap: 8, fontWeight: 700 } as const;
+const headingRowStyle = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" } as const;
+const blueLabelStyle = { color: "#0057b8", fontSize: 12, fontWeight: 850, letterSpacing: .35 } as const;
+const mutedStyle = { color: "#667085", lineHeight: 1.5 } as const;
+const cardGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 14 } as const;
+const cardStyle = { background: "#fff", border: "1px solid #e4e7ec", borderRadius: 15, padding: 18 } as const;
+const miniCardStyle = { background: "#fbfcfe", border: "1px solid #e4e7ec", borderRadius: 13, padding: 16 } as const;
+const bodyStyle = { color: "#344054", lineHeight: 1.55 } as const;
+const actionsStyle = { display: "flex", gap: 9, flexWrap: "wrap", marginTop: 12 } as const;
+const primaryLinkStyle = { padding: "9px 12px", borderRadius: 9, background: "#0057b8", color: "#fff", textDecoration: "none", fontWeight: 800 } as const;
+const secondaryLinkStyle = { padding: "9px 12px", borderRadius: 9, border: "1px solid #d0d5dd", color: "#344054", textDecoration: "none", fontWeight: 750, background: "#fff" } as const;
+const textLinkStyle = { display: "inline-block", marginTop: 10, color: "#0057b8", fontWeight: 750 } as const;
+const emptyStyle = { background: "#fff", border: "1px solid #e4e7ec", borderRadius: 14, padding: 20, color: "#667085" } as const;
+const warningStyle = { marginTop: 18, padding: 18, borderRadius: 14, background: "#fff7ed", border: "1px solid #fed7aa", color: "#7c2d12", lineHeight: 1.55 } as const;
+const errorStyle = { padding: 14, borderRadius: 12, background: "#fff6f5", border: "1px solid #fecdca", color: "#b42318" } as const;
