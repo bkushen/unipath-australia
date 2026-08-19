@@ -5,6 +5,30 @@ const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 100;
 const VALID_STATES = new Set(["VIC", "NSW", "QLD", "SA", "WA", "TAS", "ACT", "NT"]);
 
+type CourseRow = {
+  id: string;
+  university_id: string;
+  study_field_id: string | null;
+  name: string;
+  slug: string | null;
+  qualification_level: string | null;
+  cricos_code: string | null;
+  duration_months: number | null;
+  annual_fee: number | string | null;
+  total_fee: number | string | null;
+  currency: string | null;
+  description: string | null;
+  official_course_url: string | null;
+  official_course_url_verified_at: string | null;
+  source_url: string | null;
+  verified_at: string | null;
+  verification_status: string | null;
+  delivery_mode: string | null;
+  cricos_expired: boolean | null;
+};
+
+type QualificationRow = { qualification_level: string | null };
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -71,7 +95,7 @@ export async function GET(request: NextRequest) {
 
     courseQuery = courseQuery.range(from, to);
 
-    const [{ data: courses, error: courseError, count }, { data: qualificationRows, error: qualificationError }] = await Promise.all([
+    const [{ data: rawCourses, error: courseError, count }, { data: rawQualificationRows, error: qualificationError }] = await Promise.all([
       courseQuery,
       supabase.rpc("catalogue_qualification_levels"),
     ]);
@@ -79,8 +103,14 @@ export async function GET(request: NextRequest) {
     if (courseError) throw courseError;
     if (qualificationError) throw qualificationError;
 
-    const universityIds = Array.from(new Set((courses ?? []).map((course) => course.university_id).filter(Boolean)));
-    const courseIds = (courses ?? []).map((course) => course.id);
+    // Supabase's compile-time select parser does not currently understand the
+    // conditional nested PostgREST relation string above. The runtime response
+    // still has the base course fields selected here, so normalise it once.
+    const courses = (rawCourses ?? []) as unknown as CourseRow[];
+    const qualificationRows = (rawQualificationRows ?? []) as unknown as QualificationRow[];
+
+    const universityIds = Array.from(new Set(courses.map((course) => course.university_id).filter(Boolean)));
+    const courseIds = courses.map((course) => course.id);
 
     const [{ data: universities, error: universityError }, { data: courseCampuses, error: courseCampusError }] = await Promise.all([
       universityIds.length
@@ -109,7 +139,7 @@ export async function GET(request: NextRequest) {
       campusIdsByCourse.set(row.course_id, current);
     }
 
-    const results = (courses ?? []).map((course) => {
+    const results = courses.map((course) => {
       const university = universityMap.get(course.university_id);
       const courseCampusIds = campusIdsByCourse.get(course.id) ?? [];
       const resolvedCampuses = courseCampusIds.map((id) => campusMap.get(id)).filter(Boolean);
@@ -151,9 +181,9 @@ export async function GET(request: NextRequest) {
 
     const total = count ?? 0;
     const totalPages = Math.max(Math.ceil(total / pageSize), 1);
-    const qualificationOptions = (qualificationRows ?? [])
-      .map((row) => row.qualification_level)
-      .filter((value): value is string => Boolean(value));
+    const qualificationOptions = qualificationRows
+      .map((row: QualificationRow) => row.qualification_level)
+      .filter((value: string | null): value is string => Boolean(value));
 
     return NextResponse.json({
       courses: results,
