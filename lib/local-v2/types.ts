@@ -4,6 +4,7 @@ export type MigrationImportance = "none" | "consider" | "high";
 export type ScholarshipImportance = "none" | "prefer" | "high";
 export type AssessmentMode = "quick" | "detailed";
 export type VerificationStatus = "DEMO" | "VERIFIED" | "ESTIMATED" | "UNVERIFIED";
+export type EnglishTestType = "none" | "ielts" | "pte";
 
 export interface EvidenceRef {
   sourceName: string;
@@ -20,6 +21,9 @@ export interface StudentDecisionProfile {
   mode: AssessmentMode;
   highestQualification: string;
   qualificationField: string;
+  academicScorePercent?: number;
+  englishTestType?: EnglishTestType;
+  englishScore?: number;
   desiredOccupation: string;
   preferredStudy?: string;
   preferredLocation?: string;
