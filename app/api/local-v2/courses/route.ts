@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   try {
     let courseQuery = supabase
       .from("courses")
-      .select("id,university_id,study_field_id,name,slug,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,description,official_course_url,source_url,verified_at,verification_status,delivery_mode,cricos_expired")
+      .select("id,university_id,study_field_id,name,slug,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,description,official_course_url,official_course_url_verified_at,source_url,verified_at,verification_status,delivery_mode,cricos_expired")
       .or("cricos_expired.is.null,cricos_expired.eq.false")
       .order("name")
       .limit(limit);
@@ -91,6 +91,7 @@ export async function GET(request: NextRequest) {
         verifiedAt: course.verified_at,
         verificationStatus: course.verification_status,
         officialCourseUrl: ensureUrl(course.official_course_url),
+        officialCourseUrlVerifiedAt: course.official_course_url_verified_at,
         sourceUrl: ensureUrl(course.source_url),
         university: university
           ? {
