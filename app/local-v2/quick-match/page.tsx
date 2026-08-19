@@ -12,6 +12,7 @@ const money = (value: number | null | undefined, currency = "AUD") => value == n
 
 const initialProfile: StudentDecisionProfile = {
   mode: "quick",
+  age: undefined,
   highestQualification: "Bachelor",
   qualificationField: "Information Technology",
   academicScorePercent: undefined,
@@ -153,7 +154,7 @@ export default function QuickMatchPage() {
     <header style={{ marginBottom: 24 }}>
       <div style={topRowStyle}><span style={badgeStyle}>Quick Match · smart scoring + live database</span><button type="button" onClick={reset} style={ghostButtonStyle}>Clear saved answers</button></div>
       <h1 style={{ margin: "16px 0 8px", fontSize: 42, color: "#fff" }}>What should I study in Australia?</h1>
-      <p style={heroCopyStyle}>Start with only your education, career goal, budget and location. Add extra details only if you want a more precise match.</p>
+      <p style={heroCopyStyle}>Start with your age, education, career goal, budget and location. Add extra details only if you want a more precise match.</p>
     </header>
 
     {stage === "input" && <section style={shellStyle}>
@@ -161,8 +162,9 @@ export default function QuickMatchPage() {
 
       {step === 1 && <div style={panelStyle}>
         <h2>Your background & career goal</h2>
-        <p style={mutedStyle}>These are the three core details UniPath needs to start matching courses.</p>
+        <p style={mutedStyle}>Enter your age first, then your education and the career you want to work toward.</p>
         <div style={gridStyle}>
+          <label style={labelStyle}>Age<input type="number" min={15} max={100} step={1} value={profile.age ?? ""} onChange={(e) => setProfile((c) => ({ ...c, age: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} placeholder="e.g. 24" /></label>
           <SearchableDatabaseSelect label="Highest qualification" type="qualification" value={profile.highestQualification} placeholder="Search qualification" onChange={(highestQualification) => setProfile((c) => ({ ...c, highestQualification }))} />
           <SearchableDatabaseSelect label="Previous study field" type="study_field" value={profile.qualificationField} placeholder="e.g. Information Technology" onChange={(qualificationField) => setProfile((c) => ({ ...c, qualificationField }))} />
           <SearchableDatabaseSelect label="Career goal" type="occupation" value={profile.desiredOccupation} placeholder="e.g. Software Engineer" onChange={(desiredOccupation) => setProfile((c) => ({ ...c, desiredOccupation }))} />
@@ -189,7 +191,6 @@ export default function QuickMatchPage() {
         <h2>Optional details</h2>
         <p style={mutedStyle}>Skip anything you do not know. These details only refine the match and entry-requirement checks.</p>
         <div style={gridStyle}>
-          <label style={labelStyle}>Academic average / percentage <span style={optionalLabelStyle}>Optional</span><input type="number" min={0} max={100} step={0.1} value={profile.academicScorePercent ?? ""} onChange={(e) => setProfile((c) => ({ ...c, academicScorePercent: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} placeholder="e.g. 65" /></label>
           <SearchableDatabaseSelect label="Preferred study area (optional)" type="course" value={profile.preferredStudy ?? ""} placeholder="e.g. Cyber Security" helper="Leave blank if you want UniPath to infer study areas from your career goal." onChange={(preferredStudy) => setProfile((c) => ({ ...c, preferredStudy }))} />
           <label style={labelStyle}>English test <span style={optionalLabelStyle}>Optional</span><select value={profile.englishTestType ?? "none"} onChange={(e) => setProfile((c) => ({ ...c, englishTestType: e.target.value as EnglishTestType, englishScore: e.target.value === "none" ? undefined : c.englishScore }))} style={inputStyle}><option value="none">Not taken / skip</option><option value="ielts">IELTS</option><option value="pte">PTE Academic</option></select></label>
           {(profile.englishTestType ?? "none") !== "none" && <label style={labelStyle}>{profile.englishTestType === "pte" ? "PTE overall score" : "IELTS overall score"}<input type="number" min={0} max={profile.englishTestType === "pte" ? 90 : 9} step={profile.englishTestType === "pte" ? 1 : 0.5} value={profile.englishScore ?? ""} onChange={(e) => setProfile((c) => ({ ...c, englishScore: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} /></label>}
