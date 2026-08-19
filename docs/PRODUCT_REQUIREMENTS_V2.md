@@ -32,7 +32,56 @@ A student should be able to answer:
 6. If I live in a selected suburb, how long will it take to reach campus by car and public transport, and what is the simplest practical route?
 7. What evidence and updated sources support every recommendation?
 
-## 4. CV-assisted recommendation
+## 4. Required assessment and result flow
+UniPath must support two assessment depths, but they are connected rather than separate dead-end journeys.
+
+### 4.1 Quick Match flow
+1. User completes the minimum Quick Match inputs.
+2. UniPath generates the Quick Result.
+3. On the Quick Result screen, UniPath asks: **“Would you like a more detailed and accurate recommendation?”**
+4. If **Yes**, preserve all Quick Match answers and open the Detailed Assessment with those fields pre-filled. The user must never need to start again.
+5. If **No**, keep the Quick Result available.
+6. Whether the user chooses Detailed Assessment or not, the Quick Result screen must also ask: **“Would you like UniPath to consider potential PR / migration pathways after your course?”**
+7. If the user selects migration-aware analysis, re-run the recommendation engine using the same Quick Match profile plus migration preferences and show a separate migration-aware result.
+
+### 4.2 Detailed Assessment flow
+1. User completes the Detailed Assessment directly, or upgrades from Quick Match.
+2. UniPath generates the Detailed Result.
+3. After the Detailed Result is shown, UniPath asks: **“Would you like UniPath to consider potential PR / migration pathways after your course?”**
+4. If **Yes**, collect the required migration preferences and what the user permits UniPath to change (course, profession, university, campus, state, regional location, budget tolerance, duration).
+5. Re-run the full recommendation engine and display a separate Detailed Migration-Aware Result.
+6. Show the original Detailed Result and Migration-Aware Result side by side or with a clear comparison explaining what changed and why.
+
+### 4.3 Universal result rule
+**Every primary recommendation result must offer migration-pathway analysis after the result is shown.**
+
+This includes:
+- Quick Result → ask Detailed? → ask PR / migration pathways.
+- Detailed Result → ask PR / migration pathways.
+- Any future AI-generated saved recommendation → offer PR / migration analysis if it has not already been performed.
+
+Migration analysis is therefore an optional second optimisation layer, not a mandatory input before the student can see an education/career recommendation.
+
+### 4.4 Preferred user journey
+`Quick Match → Quick Result → [Upgrade to Detailed?] → [PR/Migration Analysis?]`
+
+If upgraded:
+`Quick Result → Detailed Assessment (pre-filled) → Detailed Result → [PR/Migration Analysis?] → Detailed Migration-Aware Result`
+
+If not upgraded but migration is requested:
+`Quick Result → Migration Preferences → Quick Migration-Aware Result`
+
+If user starts detailed directly:
+`Detailed Assessment → Detailed Result → Migration Preferences → Detailed Migration-Aware Result`
+
+### 4.5 Result separation
+The UI must never silently replace the original result. Keep both versions so the student can compare:
+- **Original recommendation** — primarily education, career, affordability, location and job-market fit.
+- **Migration-aware recommendation** — re-optimised using current migration-pathway alignment within user-approved constraints.
+
+The UI must clearly explain any changes to profession, course, university, campus, state, regional status, cost, commute, career score and migration alignment.
+
+## 5. CV-assisted recommendation
 ### Inputs
 - CV upload: PDF/DOCX.
 - Previous qualifications.
@@ -71,12 +120,12 @@ For each recommended option show:
 - Location fit.
 - Commute fit.
 - Labour-market fit.
-- Migration-pathway alignment.
+- Migration-pathway alignment when migration analysis has been requested.
 - Evidence confidence.
 - Risks/cautions.
 - Missing information.
 
-## 5. State recommendation engine
+## 6. State recommendation engine
 State scoring must use separate, explainable dimensions rather than a single hidden AI judgment.
 
 Suggested dimensions:
@@ -87,13 +136,13 @@ Suggested dimensions:
 - tuition affordability
 - living-cost affordability
 - regional/metropolitan preference
-- migration-pathway relevance under current rules
+- migration-pathway relevance under current rules when migration analysis is enabled
 - commute/accessibility for selected suburb/campus
 - user preference
 
 Every score must retain the source version used to calculate it.
 
-## 6. Money / affordability engine
+## 7. Money / affordability engine
 The application must show a detailed money calculation after a course/university is selected.
 
 ### Required cost components
@@ -137,7 +186,7 @@ The application must show a detailed money calculation after a course/university
 - Every estimated value must expose its assumption.
 - Calculations must be reproducible from stored inputs.
 
-## 7. Suburb-to-campus commute engine
+## 8. Suburb-to-campus commute engine
 After selecting a suburb and campus, show:
 - driving distance
 - typical driving duration
@@ -162,7 +211,7 @@ Use a provider interface so local development can use mock route fixtures and pr
 
 Do not hard-code a vendor into domain logic.
 
-## 8. Source provenance and freshness
+## 9. Source provenance and freshness
 Every changeable fact should support:
 - source_name
 - source_url
@@ -178,7 +227,7 @@ Every changeable fact should support:
 
 The UI must display "Last verified" and the source used for important claims.
 
-## 9. Proposed bounded modules
+## 10. Proposed bounded modules
 - identity/authentication
 - student profile
 - CV/document analysis
@@ -201,7 +250,7 @@ The UI must display "Last verified" and the source used for important claims.
 - admin/data verification
 - audit/observability
 
-## 10. Local dummy-data scope
+## 11. Local dummy-data scope
 Initial local fixtures should include at least:
 - 5 universities
 - 8 campuses across VIC, NSW, QLD and SA
@@ -218,7 +267,7 @@ Initial local fixtures should include at least:
 
 Dummy records must be visibly marked as demo data so they cannot be confused with current Australian facts.
 
-## 11. Software engineering standards
+## 12. Software engineering standards
 ### Code
 - TypeScript strict mode.
 - Small cohesive modules.
@@ -253,27 +302,33 @@ Dummy records must be visibly marked as demo data so they cannot be confused wit
 - Upload size/type validation and malware scanning hook.
 - Never send CV content to an AI provider without explicit product-level disclosure/consent and configured privacy controls.
 
-## 12. Recommendation safety rules
+## 13. Recommendation safety rules
 - AI must not invent fees, university facts, job-market statistics or migration rules.
 - Structured database facts are authoritative for application output.
 - AI may explain, summarise or map user language to structured filters.
 - A recommendation must be traceable to score components.
 - Migration content must be presented as informational pathway analysis, not a guarantee or personalised legal advice.
 
-## 13. Acceptance criteria for local milestone
+## 14. Acceptance criteria for local milestone
 The local milestone is complete when a developer can run the project locally and:
 1. Load deterministic dummy data.
-2. Upload or select a sample CV.
-3. Review/edit the extracted profile.
-4. Receive ranked profession/course/university/state recommendations.
-5. Select a university/course and see a full money calculation.
-6. Select a suburb and see mock driving/transit route comparison.
-7. Compare at least three course options.
-8. See the reason behind every score.
-9. See source/assumption labels on all changeable facts.
-10. Run typecheck, lint, unit tests, integration tests and production build successfully.
+2. Complete Quick Match and receive a Quick Result.
+3. From Quick Result, choose to upgrade to Detailed Assessment without re-entering existing answers.
+4. From Quick Result, optionally request migration-aware analysis and receive a distinct Quick Migration-Aware Result.
+5. Complete Detailed Assessment directly or from Quick Match and receive a Detailed Result.
+6. From Detailed Result, optionally request migration-aware analysis and receive a distinct Detailed Migration-Aware Result.
+7. Compare original and migration-aware results and see what changed and why.
+8. Upload or select a sample CV.
+9. Review/edit the extracted profile.
+10. Receive ranked profession/course/university/state recommendations.
+11. Select a university/course and see a full money calculation.
+12. Select a suburb and see mock driving/transit route comparison.
+13. Compare at least three course options.
+14. See the reason behind every score.
+15. See source/assumption labels on all changeable facts.
+16. Run typecheck, lint, unit tests, integration tests and production build successfully.
 
-## 14. Production data candidates
+## 15. Production data candidates
 When Stage B begins, prefer authoritative/primary sources for:
 - CRICOS/provider/course records
 - university official course/fee pages
