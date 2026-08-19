@@ -11,6 +11,7 @@ type Scholarship = {
   eligibility: string | null;
   sourceUrl: string | null;
   verifiedAt: string | null;
+  linkedCourseCount: number;
   university: { id: string; name: string; website: string | null; logoUrl: string | null } | null;
   linkedCourses: Array<{ id: string; name: string; qualificationLevel: string | null; annualFee: number | null; currency: string }>;
 };
@@ -55,7 +56,7 @@ export default function ScholarshipsPage() {
 
   const results = useMemo(() => scholarships
     .filter((item) => minimumPercent === 0 || (item.percentage ?? 0) >= minimumPercent)
-    .filter((item) => !linkedOnly || item.linkedCourses.length > 0)
+    .filter((item) => !linkedOnly || item.linkedCourseCount > 0)
     .sort((a, b) => (b.percentage ?? 0) - (a.percentage ?? 0) || (b.amount ?? 0) - (a.amount ?? 0)), [scholarships, minimumPercent, linkedOnly]);
 
   return (
@@ -88,9 +89,8 @@ export default function ScholarshipsPage() {
 
         {!loading && !error && results.length === 0 ? (
           <section style={{ background: "#fff", border: "1px solid #e4e7ec", borderRadius: 16, padding: 28 }}>
-            <h2 style={{ marginTop: 0 }}>No verified scholarship records are loaded yet</h2>
-            <p style={{ color: "#667085", lineHeight: 1.55 }}>The scholarship tables are connected, but the live database currently contains no scholarship rows. UniPath will show scholarships here only after their names, values, eligibility and official sources have been verified and stored.</p>
-            <p style={{ color: "#667085" }}>Demo scholarship percentages are no longer shown as if they were real.</p>
+            <h2 style={{ marginTop: 0 }}>No verified scholarship records match</h2>
+            <p style={{ color: "#667085", lineHeight: 1.55 }}>Try another scholarship name or lower the percentage filter.</p>
           </section>
         ) : (
           <section style={{ display: "grid", gap: 16 }}>
@@ -100,8 +100,9 @@ export default function ScholarshipsPage() {
                   <div><div style={{ color: "#0057b8", fontWeight: 850 }}>{item.university?.name ?? "University not linked"}</div><h2 style={{ margin: "5px 0" }}>{item.name}</h2>{item.eligibility && <p style={{ color: "#667085" }}>{item.eligibility}</p>}</div>
                   <div style={{ minWidth: 150, padding: 14, borderRadius: 13, background: "#ecfdf3", color: "#027a48" }}>{item.percentage != null ? <strong style={{ fontSize: 28 }}>{item.percentage}%</strong> : <strong>{money(item.amount)}</strong>}</div>
                 </div>
-                <p><strong>Linked courses:</strong> {item.linkedCourses.length}</p>
-                {item.linkedCourses.slice(0, 8).map((course) => <div key={course.id} style={{ padding: 10, borderTop: "1px solid #eef1f4" }}><strong>{course.name}</strong> · {money(course.annualFee, course.currency)}/year · <Link href={`/local-v2/courses/${course.id}`}>View course</Link></div>)}
+                <p><strong>Linked courses:</strong> {item.linkedCourseCount.toLocaleString()}</p>
+                {item.linkedCourses.length > 0 && <div style={{ color: "#667085", fontSize: 13, marginBottom: 5 }}>Showing up to 8 linked-course examples</div>}
+                {item.linkedCourses.map((course) => <div key={course.id} style={{ padding: 10, borderTop: "1px solid #eef1f4" }}><strong>{course.name}</strong> · {money(course.annualFee, course.currency)}/year · <Link href={`/local-v2/courses/${course.id}`}>View course</Link></div>)}
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>{item.sourceUrl && <a href={item.sourceUrl} target="_blank" rel="noreferrer">Official scholarship source ↗</a>}{item.university && <Link href={`/local-v2/universities/${item.university.id}`}>University profile</Link>}</div>
               </article>
             ))}
