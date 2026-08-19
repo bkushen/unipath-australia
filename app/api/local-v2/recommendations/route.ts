@@ -54,11 +54,10 @@ export async function GET(request: NextRequest) {
       .from("courses")
       .select("id,university_id,study_field_id,name,qualification_level,cricos_code,duration_months,annual_fee,total_fee,currency,delivery_mode,official_course_url,cricos_tuition_fee_total,cricos_estimated_total_cost,cricos_expired")
       .or("cricos_expired.is.null,cricos_expired.eq.false")
-      .limit(500);
+      .limit(150);
 
-    const search = study || field;
-    if (search) {
-      const safe = search.replace(/[%_,()]/g, " ").trim();
+    if (study) {
+      const safe = study.replace(/[%_,()]/g, " ").trim();
       if (safe) courseQuery = courseQuery.or(`name.ilike.%${safe}%,qualification_level.ilike.%${safe}%`);
     }
 
@@ -126,7 +125,7 @@ export async function GET(request: NextRequest) {
       const linkedOccupationRows = occupationsByCourse.get(course.id) ?? [];
       const occupationNames = linkedOccupationRows.map((item) => occupationMap.get(item.id)).filter(Boolean) as string[];
       const career = occupationNames.length ? Math.max(...occupationNames.map((name) => textScore(occupation, name))) : textScore(occupation, course.name, studyField);
-      const academic = textScore(field || study, studyField, course.name, course.qualification_level);
+      const academic = textScore(study || field, studyField, course.name, course.qualification_level);
 
       const totalFee = course.total_fee != null ? Number(course.total_fee) : course.cricos_tuition_fee_total != null ? Number(course.cricos_tuition_fee_total) : course.cricos_estimated_total_cost != null ? Number(course.cricos_estimated_total_cost) : null;
       const annualFee = course.annual_fee != null ? Number(course.annual_fee) : totalFee && course.duration_months ? totalFee / Math.max(course.duration_months / 12, 1) : null;
