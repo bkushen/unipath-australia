@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CurrencyBudgetInput } from "@/components/local-v2/CurrencyBudgetInput";
+import { SearchableDatabaseSelect, type SearchOption } from "@/components/local-v2/SearchableDatabaseSelect";
 import { clearLocalV2Profile, loadLocalV2Profile, saveLocalV2Profile } from "@/lib/local-v2/profile-storage";
 import { rankCourses } from "@/lib/local-v2/recommendation-engine";
 import type { AustralianState, MigrationImportance, ScholarshipImportance, StudentDecisionProfile } from "@/lib/local-v2/types";
@@ -14,6 +15,8 @@ const initialProfile: StudentDecisionProfile = {
   highestQualification: "Bachelor",
   qualificationField: "Information Technology",
   desiredOccupation: "Software Engineer",
+  preferredStudy: "",
+  preferredLocation: "",
   annualTuitionBudgetCents: 4000000,
   semesterTuitionBudgetCents: 2000000,
   fullCourseBudgetCents: 8000000,
@@ -64,6 +67,15 @@ export default function QuickMatchPage() {
       preferredStates: current.preferredStates.includes(state)
         ? current.preferredStates.filter((item) => item !== state)
         : [...current.preferredStates, state],
+    }));
+  };
+
+  const selectLocation = (option: SearchOption) => {
+    const state = option.state as AustralianState | undefined;
+    setProfile((current) => ({
+      ...current,
+      preferredLocation: option.value,
+      preferredStates: state && states.includes(state) ? [state] : current.preferredStates,
     }));
   };
 
@@ -133,12 +145,12 @@ export default function QuickMatchPage() {
     <main style={pageStyle}>
       <header style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
-          <span style={demoBadgeStyle}>Demo version · live currency conversion</span>
+          <span style={demoBadgeStyle}>Demo recommendations · live database search · live currency</span>
           <button type="button" onClick={resetSavedProfile} style={tinyButtonStyle}>Clear saved answers</button>
         </div>
         <h1 style={{ margin: "18px 0 8px", fontSize: 40, lineHeight: 1.1 }}>Find your best course in Australia</h1>
         <p style={{ color: "#e7efff", maxWidth: 760, fontSize: 17, lineHeight: 1.55, margin: 0 }}>
-          Compare course fit, university options, locations, scholarships and study costs in one guided search.
+          Search real UniPath database options for study fields, careers, courses and locations, then compare fit, scholarships and study costs.
         </p>
         <div style={saveNoticeStyle}>✓ {restoredProfile ? "Your previous answers were restored." : "Your answers are saved automatically in this browser."}</div>
       </header>
@@ -159,26 +171,43 @@ export default function QuickMatchPage() {
               <div style={progressTrackStyle}><div style={{ ...progressFillStyle, width: "25%" }} /></div>
             </div>
             <h2 style={{ margin: "0 0 6px", fontSize: 28 }}>Quick Match</h2>
-            <p style={mutedStyle}>Start with the essentials. You can add more details after seeing your first recommendations.</p>
+            <p style={mutedStyle}>Type in each field and choose a suggestion from the UniPath database.</p>
 
             <div style={subsectionStyle}>
-              <div style={subsectionHeaderStyle}><span style={subsectionIconStyle}>1</span><div><strong>Study goal</strong><div style={helperStyle}>Tell us your current study background and the career you want.</div></div></div>
+              <div style={subsectionHeaderStyle}><span style={subsectionIconStyle}>1</span><div><strong>Study goal</strong><div style={helperStyle}>These fields now search the database while you type.</div></div></div>
               <div style={formGridStyle}>
-                <label style={labelStyle}>Highest qualification
-                  <select value={profile.highestQualification} onChange={(e) => setProfile({ ...profile, highestQualification: e.target.value })} style={inputStyle}>
-                    <option>Bachelor</option><option>Diploma</option><option>Master</option><option>High School</option>
-                  </select>
-                </label>
-                <label style={labelStyle}>Previous study field
-                  <select value={profile.qualificationField} onChange={(e) => setProfile({ ...profile, qualificationField: e.target.value })} style={inputStyle}>
-                    <option>Information Technology</option><option>Engineering</option><option>Business</option><option>Health</option>
-                  </select>
-                </label>
-                <label style={labelStyle}>Career goal
-                  <select value={profile.desiredOccupation} onChange={(e) => setProfile({ ...profile, desiredOccupation: e.target.value })} style={inputStyle}>
-                    <option>Software Engineer</option><option>Software Developer</option><option>Data Scientist</option><option>Cyber Security Analyst</option><option>ICT Business Analyst</option>
-                  </select>
-                </label>
+                <SearchableDatabaseSelect
+                  label="Highest qualification"
+                  type="qualification"
+                  value={profile.highestQualification}
+                  placeholder="Search qualification level"
+                  helper="Qualification levels are derived from courses currently in the database."
+                  onChange={(highestQualification) => setProfile((current) => ({ ...current, highestQualification }))}
+                />
+                <SearchableDatabaseSelect
+                  label="Previous study field"
+                  type="study_field"
+                  value={profile.qualificationField}
+                  placeholder="e.g. Information Technology"
+                  helper="Search the UniPath study-fields database."
+                  onChange={(qualificationField) => setProfile((current) => ({ ...current, qualificationField }))}
+                />
+                <SearchableDatabaseSelect
+                  label="Career goal"
+                  type="occupation"
+                  value={profile.desiredOccupation}
+                  placeholder="e.g. Software Engineer"
+                  helper="Search occupations and occupation codes in the database."
+                  onChange={(desiredOccupation) => setProfile((current) => ({ ...current, desiredOccupation }))}
+                />
+                <SearchableDatabaseSelect
+                  label="Preferred study area or course (optional)"
+                  type="course"
+                  value={profile.preferredStudy ?? ""}
+                  placeholder="Search course name or level"
+                  helper="Useful if you already have a course or study direction in mind."
+                  onChange={(preferredStudy) => setProfile((current) => ({ ...current, preferredStudy }))}
+                />
               </div>
             </div>
 
@@ -207,12 +236,24 @@ export default function QuickMatchPage() {
                     return <button key={value} type="button" onClick={() => setProfile({ ...profile, scholarshipImportance: value })} style={{ ...choicePillStyle, ...(selected ? selectedChoicePillStyle : {}) }}>{selected ? "✓ " : ""}{label}</button>;
                   })}
                 </div>
-                <div style={helperStyle}>UniPath will later match course and university scholarships from the database and show the estimated saving automatically.</div>
+                <div style={helperStyle}>Scholarship matching will use course and university scholarship records as that data is populated and verified.</div>
               </div>
             </div>
 
             <div style={{ ...subsectionStyle, marginBottom: 0 }}>
-              <div style={subsectionHeaderStyle}><span style={subsectionIconStyle}>3</span><div><strong>Location preferences</strong><div style={helperStyle}>Choose one or more states. You can leave this flexible.</div></div></div>
+              <div style={subsectionHeaderStyle}><span style={subsectionIconStyle}>3</span><div><strong>Location preferences</strong><div style={helperStyle}>Search a city/campus area or choose states directly.</div></div></div>
+              <div style={{ maxWidth: 560, marginBottom: 18 }}>
+                <SearchableDatabaseSelect
+                  label="Preferred location (optional)"
+                  type="location"
+                  value={profile.preferredLocation ?? ""}
+                  placeholder="e.g. Melbourne, Ballarat, Sydney"
+                  helper="Suggestions come from campus cities and states in the UniPath database. Selecting one also sets its state preference."
+                  onChange={(preferredLocation) => setProfile((current) => ({ ...current, preferredLocation }))}
+                  onSelect={selectLocation}
+                />
+              </div>
+
               <div style={{ fontWeight: 700, marginBottom: 10 }}>Preferred state(s)</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 9 }}>
                 {states.map((state) => {
