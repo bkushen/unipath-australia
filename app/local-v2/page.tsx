@@ -1,144 +1,105 @@
-import { calculateCourseCost, formatAud } from "@/lib/local-v2/cost-engine";
-import { demoSuburbs } from "@/lib/local-v2/fixtures";
-import { rankCourses } from "@/lib/local-v2/recommendation-engine";
-import { chooseRecommendedRoute, DemoRoutingProvider } from "@/lib/local-v2/routing-provider";
-import type { StudentDecisionProfile } from "@/lib/local-v2/types";
+import Link from "next/link";
 
-const baseProfile: StudentDecisionProfile = {
-  mode: "quick",
-  highestQualification: "Bachelor",
-  qualificationField: "Information Technology",
-  desiredOccupation: "Software Engineer",
-  annualTuitionBudgetCents: 4000000,
-  totalFundsCents: 13000000,
-  preferredStates: ["VIC", "SA"],
-  regionalAccepted: true,
-  migrationImportance: "none",
-  skills: ["web", "software", "databases"],
-  yearsExperience: 2,
-  preferredSuburbId: "s-ballarat",
-  transportPreference: "either",
-};
+const groups = [
+  {
+    title: "Start & Recommendations",
+    description: "Core decision journeys for testing how a student moves from profile input to recommendations.",
+    items: [
+      { href: "/local-v2/quick-match", title: "Quick Match", text: "Basic profile input, quick recommendations and optional migration-aware comparison." },
+      { href: "/local-v2/detailed", title: "Detailed Assessment", text: "Expanded student, career, study, finance and location inputs." },
+      { href: "/local-v2/cv-review", title: "CV / Profile Review", text: "Review a demo extracted profile and generate recommendations." },
+      { href: "/local-v2/state-career", title: "State + Career Recommendation", text: "Compare best-fit career direction and state using demo scoring." },
+      { href: "/local-v2/journey", title: "Connected Journey", text: "Profile → recommendation → course → finance → commute → save." },
+    ],
+  },
+  {
+    title: "Browse & Research",
+    description: "Explore the demo catalogue by course, university, career, migration pathway, scholarship and suburb.",
+    items: [
+      { href: "/local-v2/courses", title: "Courses", text: "Search and filter the local demo course catalogue." },
+      { href: "/local-v2/universities", title: "Universities", text: "Browse universities, campuses and available demo courses." },
+      { href: "/local-v2/careers", title: "Careers", text: "Browse career outcomes and their connected study options." },
+      { href: "/local-v2/migration", title: "Migration Pathways", text: "Demo pathway explorer with clear non-advice disclaimers." },
+      { href: "/local-v2/scholarships", title: "Scholarships", text: "Filter courses by scholarship percentage and location." },
+      { href: "/local-v2/suburbs", title: "Suburbs & Living Costs", text: "Browse demo living costs and campus connections." },
+    ],
+  },
+  {
+    title: "Money, Travel & Decisions",
+    description: "Use the supporting decision tools after a course or location has been shortlisted.",
+    items: [
+      { href: "/local-v2/finance", title: "Finance", text: "Before-visa spend, show-money planning and actual cost to reach Australia." },
+      { href: "/local-v2/course-finance", title: "Course → Finance", text: "See how changing the selected course changes the financial result." },
+      { href: "/local-v2/commute", title: "Commute", text: "Compare demo driving and public-transport routes." },
+      { href: "/local-v2/compare", title: "Compare Courses", text: "Compare three courses across tuition, state, career and migration metrics." },
+      { href: "/local-v2/dashboard", title: "Saved Recommendations", text: "Save demo recommendations locally in the browser." },
+    ],
+  },
+];
 
-const migrationProfile: StudentDecisionProfile = {
-  ...baseProfile,
-  migrationImportance: "high",
-};
-
-const sectionStyle = {
-  border: "1px solid #d9dee7",
-  borderRadius: 16,
-  padding: 20,
-  background: "#fff",
-} as const;
-
-export default async function LocalV2PreviewPage() {
-  const initial = rankCourses(baseProfile);
-  const migrationAware = rankCourses(migrationProfile);
-  const initialBest = initial[0];
-  const migrationBest = migrationAware[0];
-
-  if (!initialBest || !migrationBest) {
-    return <main style={{ padding: 32 }}>No demo recommendations are available.</main>;
-  }
-
-  const suburb = demoSuburbs.find((item) => item.id === initialBest.campus.suburbId);
-  if (!suburb) throw new Error("Missing demo suburb fixture.");
-
-  const cost = calculateCourseCost(initialBest.course, suburb, baseProfile.totalFundsCents);
-  const routes = await new DemoRoutingProvider().getRoutes(suburb.id, initialBest.campus.id);
-  const recommendedRoute = chooseRecommendedRoute(routes, baseProfile.transportPreference);
-
+export default function LocalV2HubPage() {
   return (
-    <main style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 20px 64px", background: "#f6f8fb" }}>
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff2cc", fontWeight: 700 }}>
-          LOCAL DEMO DATA ONLY
-        </div>
-        <h1 style={{ marginBottom: 8 }}>UniPath V2 Decision Engine Preview</h1>
-        <p style={{ maxWidth: 780, color: "#4b5563" }}>
-          This page proves the local-first architecture: profile input → explainable ranking → optional migration-aware re-ranking → affordability → commute. No values on this page are real Australian course, migration or labour-market facts.
-        </p>
-      </div>
+    <main style={{ minHeight: "100vh", background: "#f6f8fb", padding: "36px 18px 72px" }}>
+      <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+        <header style={{ marginBottom: 28 }}>
+          <span style={{ display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#fff2cc", fontWeight: 800 }}>
+            LOCAL V2 · DEMO DATA ONLY
+          </span>
+          <h1 style={{ marginBottom: 10, fontSize: 38 }}>UniPath Australia — Local Development Hub</h1>
+          <p style={{ maxWidth: 850, color: "#586174", fontSize: 17, lineHeight: 1.6 }}>
+            One place to open every basic UniPath V2 function currently available in local development. These pages prove the product flow and engineering structure before real provider, job-market, migration, routing, currency and living-cost data are connected.
+          </p>
+        </header>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 16 }}>
-        <section style={sectionStyle}>
-          <h2>Quick profile</h2>
-          <p><strong>Qualification:</strong> {baseProfile.highestQualification} — {baseProfile.qualificationField}</p>
-          <p><strong>Career goal:</strong> {baseProfile.desiredOccupation}</p>
-          <p><strong>Tuition budget:</strong> {formatAud(baseProfile.annualTuitionBudgetCents)}/year</p>
-          <p><strong>Total funds:</strong> {formatAud(baseProfile.totalFundsCents)}</p>
-          <p><strong>Preferred states:</strong> {baseProfile.preferredStates.join(", ")}</p>
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 28 }}>
+          {[
+            ["Basic modules", "16"],
+            ["Demo courses", "6"],
+            ["Demo universities", "5"],
+            ["Current stage", "Local validation"],
+          ].map(([label, value]) => (
+            <article key={label} style={{ background: "#fff", border: "1px solid #dfe3ea", borderRadius: 16, padding: 18 }}>
+              <div style={{ color: "#667085", fontSize: 13, fontWeight: 800 }}>{label}</div>
+              <div style={{ marginTop: 5, fontSize: 24, fontWeight: 850 }}>{value}</div>
+            </article>
+          ))}
         </section>
 
-        <section style={sectionStyle}>
-          <h2>Initial best match</h2>
-          <p><strong>{initialBest.course.name}</strong></p>
-          <p>{initialBest.university.name}</p>
-          <p>{initialBest.campus.name}</p>
-          <p><strong>Overall score:</strong> {initialBest.scores.overall}%</p>
-          <p><strong>Career:</strong> {initialBest.scores.career}% · <strong>Budget:</strong> {initialBest.scores.affordability}%</p>
-          <p><strong>Labour market:</strong> {initialBest.scores.labourMarket}% · <strong>Migration:</strong> {initialBest.scores.migration}%</p>
+        <section style={{ marginBottom: 28, padding: 20, background: "#eef6ff", border: "1px solid #bfdbfe", borderRadius: 18 }}>
+          <h2 style={{ marginTop: 0 }}>Recommended test flow</h2>
+          <p style={{ marginBottom: 14, color: "#475467" }}>
+            For the clearest end-to-end test, start with Quick Match or the Connected Journey. Use the browse tools when you want to inspect individual entities.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <Link href="/local-v2/quick-match" style={{ padding: "11px 15px", borderRadius: 10, background: "#111827", color: "#fff", textDecoration: "none", fontWeight: 800 }}>
+              Start Quick Match
+            </Link>
+            <Link href="/local-v2/journey" style={{ padding: "11px 15px", borderRadius: 10, background: "#fff", border: "1px solid #cbd5e1", textDecoration: "none", fontWeight: 800 }}>
+              Open Connected Journey
+            </Link>
+          </div>
         </section>
 
-        <section style={sectionStyle}>
-          <h2>Migration-aware best match</h2>
-          <p><strong>{migrationBest.course.name}</strong></p>
-          <p>{migrationBest.university.name}</p>
-          <p>{migrationBest.campus.name}</p>
-          <p><strong>Overall score:</strong> {migrationBest.scores.overall}%</p>
-          <p><strong>Career:</strong> {migrationBest.scores.career}% · <strong>Budget:</strong> {migrationBest.scores.affordability}%</p>
-          <p><strong>Labour market:</strong> {migrationBest.scores.labourMarket}% · <strong>Migration:</strong> {migrationBest.scores.migration}%</p>
-          <p style={{ color: "#92400e" }}>Migration values are sample weighting data only and are not migration advice.</p>
-        </section>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
-        <section style={sectionStyle}>
-          <h2>Money calculation</h2>
-          <p><strong>Gross tuition:</strong> {formatAud(cost.grossTuitionCents)}</p>
-          <p><strong>Scholarship estimate:</strong> −{formatAud(cost.scholarshipSavingsCents)}</p>
-          <p><strong>Net tuition:</strong> {formatAud(cost.netTuitionCents)}</p>
-          <p><strong>Living cost:</strong> {formatAud(cost.livingCostCents)}</p>
-          <p><strong>Other/setup:</strong> {formatAud(cost.otherCostCents)}</p>
-          <hr />
-          <p><strong>Total estimated cost:</strong> {formatAud(cost.totalEstimatedCostCents)}</p>
-          <p><strong>Money remaining:</strong> {formatAud(cost.remainingFundsCents)}</p>
-          <p><strong>Budget consumed:</strong> {cost.budgetConsumedPercent}%</p>
-          <small>Assumption: annual tuition increases {cost.assumptions.annualFeeIncreaseBps / 100}% in this demo calculation.</small>
-        </section>
-
-        <section style={sectionStyle}>
-          <h2>Commute preview</h2>
-          <p><strong>Living area:</strong> {suburb.name}</p>
-          <p><strong>Campus:</strong> {initialBest.campus.name}</p>
-          {routes.length === 0 ? (
-            <p>No mock route fixture exists for this combination yet.</p>
-          ) : (
-            <>
-              {routes.map((route) => (
-                <div key={route.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid #eef0f3" }}>
-                  <strong>{route.mode === "driving" ? "Driving" : "Public transport"}</strong>
-                  <div>{route.durationMinutes} min · {route.distanceKm} km · {route.transfers} transfer(s)</div>
-                  <small>{route.summary}</small>
-                </div>
+        {groups.map((group) => (
+          <section key={group.title} style={{ marginBottom: 30 }}>
+            <h2 style={{ marginBottom: 6 }}>{group.title}</h2>
+            <p style={{ marginTop: 0, color: "#667085" }}>{group.description}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))", gap: 14 }}>
+              {group.items.map((item) => (
+                <Link key={item.href} href={item.href} style={{ display: "block", padding: 18, background: "#fff", border: "1px solid #dfe3ea", borderRadius: 16, textDecoration: "none", color: "inherit" }}>
+                  <div style={{ fontSize: 19, fontWeight: 850, marginBottom: 7 }}>{item.title}</div>
+                  <div style={{ color: "#667085", lineHeight: 1.5 }}>{item.text}</div>
+                  <div style={{ marginTop: 12, fontWeight: 800 }}>Open →</div>
+                </Link>
               ))}
-              {recommendedRoute && <p><strong>Recommended route:</strong> {recommendedRoute.summary} ({recommendedRoute.durationMinutes} min)</p>}
-            </>
-          )}
+            </div>
+          </section>
+        ))}
+
+        <section style={{ padding: 20, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 18 }}>
+          <strong>Local-development notice:</strong> Course fees, scholarship values, labour-market scores, migration-alignment scores, living costs and route data are illustrative demo values. Production UniPath must replace them with verified, source-dated data and must never present migration outcomes as guaranteed.
         </section>
       </div>
-
-      <section style={{ ...sectionStyle, marginTop: 16 }}>
-        <h2>Why the first result ranked highly</h2>
-        <ul>
-          {initialBest.reasons.map((reason) => <li key={reason}>{reason}</li>)}
-        </ul>
-        <h3>Cautions</h3>
-        <ul>
-          {initialBest.cautions.map((caution) => <li key={caution}>{caution}</li>)}
-        </ul>
-      </section>
     </main>
   );
 }
