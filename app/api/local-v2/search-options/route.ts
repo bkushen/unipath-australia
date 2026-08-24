@@ -131,12 +131,6 @@ export async function GET(request: NextRequest) {
       if ((oscaRows ?? []).length > 0) {
         source = "ABS_OSCA_2024";
         const seen = new Set<string>();
-        if (!q) {
-          for (const group of broadOccupationGroups) {
-            seen.add(group.toLowerCase());
-            options.push({ id: `occupation-group:${group}`, label: group, value: group, secondary: "OSCA major occupation group" });
-          }
-        }
         for (const row of oscaRows ?? []) {
           const key = row.name.toLowerCase();
           if (seen.has(key)) continue;
