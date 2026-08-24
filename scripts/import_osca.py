@@ -34,6 +34,7 @@ ABS_INDEX_XLSX = f"{ABS_DOWNLOAD_BASE}/OSCA%20index%20of%20principal%20titles%20
 ABS_BROWSE_BASE = "https://www.abs.gov.au/statistics/classifications/osca-occupation-standard-classification-australia/2024-version-1-0/browse-classification"
 CODE_RE = re.compile(r"^\d{6}$")
 CELL_REF_RE = re.compile(r"^([A-Z]+)\d+$")
+NUMBER_RE = re.compile(r"^\d+(?:\.\d+)?$")
 
 
 def load_env(path: Path) -> None:
@@ -44,9 +45,7 @@ def load_env(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def download(url: str, target: Path, label: str) -> None:
@@ -62,18 +61,14 @@ def shared_strings(zf: zipfile.ZipFile) -> list[str]:
     except KeyError:
         return []
     ns = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-    values: list[str] = []
-    for si in root.findall("a:si", ns):
-        values.append("".join(t.text or "" for t in si.iterfind(".//a:t", ns)))
-    return values
+    return ["".join(t.text or "" for t in si.iterfind(".//a:t", ns)) for si in root.findall("a:si", ns)]
 
 
 def cell_value(cell: ET.Element, strings: list[str], ns: dict[str, str]) -> str:
     cell_type = cell.attrib.get("t")
     value_el = cell.find("a:v", ns)
     if value_el is None:
-        parts = [item.text or "" for item in cell.findall(".//a:is//a:t", ns)]
-        return "".join(parts).strip()
+        return "".join(item.text or "" for item in cell.findall(".//a:is//a:t", ns)).strip()
     raw = (value_el.text or "").strip()
     if cell_type == "s" and raw.isdigit():
         idx = int(raw)
@@ -103,46 +98,29 @@ def workbook_rows(xlsx: Path) -> list[dict[str, str]]:
     return output
 
 
-def normalise_header(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
-
-
-def find_header_map(rows: list[dict[str, str]], required_words: tuple[str, ...]) -> tuple[int, dict[str, str]] | None:
-    for index, row in enumerate(rows[:80]):
-        headers = {column: normalise_header(value) for column, value in row.items()}
-        joined = " ".join(headers.values())
-        if all(word in joined for word in required_words):
-            return index, headers
-    return None
-
-
-def find_column(headers: dict[str, str], *needles: str) -> str | None:
-    for column, header in headers.items():
-        if all(needle in header for needle in needles):
-            return column
-    return None
+def clean_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
 
 
 def extract_structure(xlsx: Path) -> dict[str, dict[str, object]]:
     records: dict[str, dict[str, object]] = {}
     for row in workbook_rows(xlsx):
-        values = list(row.values())
+        values = [clean_text(v) for v in row.values() if clean_text(v)]
         code = next((value for value in values if CODE_RE.fullmatch(value)), None)
         if not code:
             continue
         code_position = values.index(code)
-        candidates = [value for value in values[code_position + 1 :] if not re.fullmatch(r"\d+(?:\.\d+)?", value)]
+        candidates = [value for value in values[code_position + 1 :] if not NUMBER_RE.fullmatch(value)]
         if not candidates:
             continue
-        name = candidates[0].strip()
+        name = candidates[0]
         if len(name) < 2:
             continue
-        source_url = f"{ABS_BROWSE_BASE}/{code[0]}/{code[:2]}/{code[:3]}/{code[:4]}/{code}"
         records[code] = {
             "code": code,
             "name": name,
             "classification_level": "occupation",
-            "source_url": source_url,
+            "source_url": f"{ABS_BROWSE_BASE}/{code[0]}/{code[:2]}/{code[:3]}/{code[:4]}/{code}",
             "source_release": ABS_RELEASE,
             "description": None,
             "alternative_titles": [],
@@ -151,64 +129,82 @@ def extract_structure(xlsx: Path) -> dict[str, dict[str, object]]:
     return records
 
 
-def extract_descriptions(xlsx: Path) -> dict[str, str]:
-    rows = workbook_rows(xlsx)
+def extract_descriptions(xlsx: Path, records: dict[str, dict[str, object]]) -> dict[str, str]:
+    """Extract occupation lead statements without relying on a fixed ABS header layout."""
     descriptions: dict[str, str] = {}
-    header = find_header_map(rows, ("code",))
-    if not header:
-        return descriptions
-    header_index, headers = header
-    code_col = find_column(headers, "code")
-    description_col = find_column(headers, "description") or find_column(headers, "definition")
-
-    for row in rows[header_index + 1 :]:
-        code = row.get(code_col, "") if code_col else next((v for v in row.values() if CODE_RE.fullmatch(v)), "")
-        if not CODE_RE.fullmatch(code):
+    for row in workbook_rows(xlsx):
+        values = [clean_text(v) for v in row.values() if clean_text(v)]
+        code = next((value for value in values if CODE_RE.fullmatch(value)), None)
+        if not code or code not in records:
             continue
-        description = row.get(description_col, "").strip() if description_col else ""
-        if not description:
-            values = [v.strip() for v in row.values() if v.strip() and v != code]
-            prose = [v for v in values if len(v) >= 40 and not CODE_RE.fullmatch(v)]
-            description = prose[0] if prose else ""
-        if description:
-            descriptions[code] = description
+        principal = str(records[code]["name"]).lower()
+        candidates: list[str] = []
+        for value in values:
+            lower = value.lower()
+            if value == code or lower == principal or NUMBER_RE.fullmatch(value):
+                continue
+            if lower in {"occupation", "principal title", "lead statement", "description", "skill level"}:
+                continue
+            # Occupation lead statements are prose. This avoids selecting short labels,
+            # category names, or skill-level values if the workbook layout changes.
+            if len(value) >= 30 and (" " in value):
+                candidates.append(value)
+        if candidates:
+            descriptions[code] = max(candidates, key=len)
     return descriptions
 
 
-def extract_titles(xlsx: Path) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-    rows = workbook_rows(xlsx)
+def extract_titles(xlsx: Path, records: dict[str, dict[str, object]]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Extract alternative titles and specialisations from any column order.
+
+    ABS title-index workbooks have changed layout across releases, so this parser
+    identifies the six-digit occupation code and title-type marker per row rather
+    than depending on one exact header row.
+    """
     alternatives: dict[str, list[str]] = defaultdict(list)
     specialisations: dict[str, list[str]] = defaultdict(list)
-    header = find_header_map(rows, ("code", "title"))
-    if not header:
-        return dict(alternatives), dict(specialisations)
 
-    header_index, headers = header
-    code_col = find_column(headers, "code")
-    type_col = find_column(headers, "type") or find_column(headers, "category")
-    title_col = find_column(headers, "title")
-
-    for row in rows[header_index + 1 :]:
-        code = row.get(code_col, "") if code_col else next((v for v in row.values() if CODE_RE.fullmatch(v)), "")
-        if not CODE_RE.fullmatch(code):
+    for row in workbook_rows(xlsx):
+        values = [clean_text(v) for v in row.values() if clean_text(v)]
+        code = next((value for value in values if CODE_RE.fullmatch(value)), None)
+        if not code or code not in records:
             continue
-        kind = row.get(type_col, "").strip().lower() if type_col else ""
-        title = row.get(title_col, "").strip() if title_col else ""
 
-        if not title or title == code:
-            text_values = [v.strip() for v in row.values() if v.strip() and v != code]
-            type_like = next((v for v in text_values if any(word in v.lower() for word in ("alternative", "specialisation", "specialization", "principal", "nec"))), "")
-            if not kind and type_like:
-                kind = type_like.lower()
-            title_candidates = [v for v in text_values if v != type_like and len(v) > 1]
-            title = title_candidates[-1] if title_candidates else ""
-
-        if not title:
+        kind_value = next(
+            (
+                value for value in values
+                if any(marker in value.lower() for marker in (
+                    "alternative title", "alternative", "specialisation", "specialization",
+                    "principal title", "occupation in nec", " nec "
+                ))
+            ),
+            "",
+        )
+        kind = kind_value.lower()
+        if "alternative" not in kind and "specialisation" not in kind and "specialization" not in kind:
             continue
+
+        principal = str(records[code]["name"]).lower()
+        title_candidates = [
+            value for value in values
+            if value != code
+            and value != kind_value
+            and value.lower() != principal
+            and not NUMBER_RE.fullmatch(value)
+            and value.lower() not in {"code", "title", "type", "occupation code", "occupation title"}
+        ]
+        if not title_candidates:
+            continue
+
+        # The title is normally the compact human-readable text in the row.
+        title = min(title_candidates, key=lambda value: (len(value), value.lower()))
+        if len(title) < 2:
+            continue
+
         if "alternative" in kind:
             if title not in alternatives[code]:
                 alternatives[code].append(title)
-        elif "specialisation" in kind or "specialization" in kind:
+        else:
             if title not in specialisations[code]:
                 specialisations[code].append(title)
 
@@ -254,8 +250,8 @@ def main() -> int:
         download(ABS_INDEX_XLSX, index_file, "title index")
 
         records = extract_structure(structure_file)
-        descriptions = extract_descriptions(descriptions_file)
-        alternatives, specialisations = extract_titles(index_file)
+        descriptions = extract_descriptions(descriptions_file, records)
+        alternatives, specialisations = extract_titles(index_file, records)
 
     if len(records) < 500:
         print(f"Safety check failed: only {len(records)} six-digit occupations were found.", file=sys.stderr)
@@ -275,12 +271,13 @@ def main() -> int:
     print(f"Occupations with alternative titles: {alternative_count}")
     print(f"Occupations with specialisations: {specialisation_count}")
 
-    # The structure import must remain useful even if ABS changes the optional
-    # enrichment workbook layout, but report zero-match enrichments clearly.
+    # Fail enrichment safely instead of overwriting good metadata with empty data.
     if description_count == 0:
-        print("Warning: no occupation descriptions were matched; ABS workbook layout may have changed.", file=sys.stderr)
+        print("Safety check failed: no occupation descriptions were matched.", file=sys.stderr)
+        return 3
     if alternative_count == 0 and specialisation_count == 0:
-        print("Warning: no alternative titles/specialisations were matched; ABS workbook layout may have changed.", file=sys.stderr)
+        print("Safety check failed: no alternative titles or specialisations were matched.", file=sys.stderr)
+        return 4
 
     upsert(supabase_url, service_key, list(records.values()))
     print("OSCA import and enrichment complete.")
