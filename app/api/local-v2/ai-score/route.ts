@@ -6,6 +6,11 @@ type Candidate = {
   university: { name: string };
   campus: { city?: string | null; state?: string | null; regional?: boolean | null };
   scholarship?: { name: string; percentage?: number | null; amount?: number | null } | null;
+  careerMatch?: {
+    source?: "explicit_mapping" | "osca_metadata_inference" | "inferred_text" | string;
+    linkedOccupations?: string[];
+    oscaOccupation?: { code: string; name: string; sourceRelease?: string | null } | null;
+  };
   scores: { academic: number; career: number; affordability: number; location: number; migration: number; overall: number };
 };
 
@@ -216,7 +221,16 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
   const finalScore = clamp(baseFit * (1 - evidenceWeight) + eligibilityEvidence * evidenceWeight + preferenceAdjustment);
   const confidence = requirement ? (verifiedChecks >= 2 && unresolvedChecks === 0 ? "high" : "medium") : "low";
 
-  if (candidate.scores.career >= 80) reasons.push("Strong career-direction alignment in the live recommendation engine.");
+  const osca = candidate.careerMatch?.oscaOccupation;
+  if (osca) {
+    reasons.push(`Career goal: ${osca.name} · OSCA ${osca.code} (${osca.sourceRelease ?? "OSCA 2024 Version 1.0"}).`);
+    if (candidate.careerMatch?.source === "osca_metadata_inference") {
+      reasons.push("Course-career relevance was inferred by UniPath using the official OSCA occupation metadata; this is not an ABS course recommendation.");
+    } else if (candidate.careerMatch?.source === "explicit_mapping") {
+      reasons.push("This course also has an explicit course-to-career mapping loaded in UniPath.");
+    }
+  }
+  if (candidate.scores.career >= 80 && !osca) reasons.push("Strong career-direction alignment in the live recommendation engine.");
   if (candidate.scores.affordability >= 80) reasons.push("Available tuition evidence fits or is close to your stated budget.");
   if (candidate.scores.location >= 85) reasons.push("The selected campus aligns well with your location preferences.");
   if (candidate.scholarship && profile.scholarshipImportance !== "none") reasons.push("A linked scholarship is available in UniPath for this course.");
@@ -297,6 +311,7 @@ export async function POST(request: NextRequest) {
       annualFee: candidate.course.annualFee,
       totalFee: candidate.course.totalFee,
       scholarship: candidate.scholarship ?? null,
+      careerMatch: candidate.careerMatch ?? null,
       baseScores: candidate.scores,
       entryRequirement: requirementMap.get(candidate.course.id) ?? null,
     }));
@@ -307,7 +322,7 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, live course data, and source-backed entry requirements. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, or skills-assessment outcomes. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
+        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, live course data, OSCA career evidence, and source-backed entry requirements. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
         input: JSON.stringify({ profile, candidates: compactCandidates }),
         text: {
           format: {
