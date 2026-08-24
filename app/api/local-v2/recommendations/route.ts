@@ -29,13 +29,55 @@ function textScore(query: string, ...values: Array<string | null | undefined>) {
   return clamp(45 + overlap * 18);
 }
 
-const careerDomains: Array<{ triggers: string[]; courseTerms: string[] }> = [
-  { triggers: ["software", "programmer", "developer", "web", "mobile"], courseTerms: ["software", "programming", "computer science", "computing", "information technology", "web", "mobile", "application development"] },
+type CareerDomain = { triggers: string[]; courseTerms: string[] };
+
+const careerDomains: CareerDomain[] = [
+  { triggers: ["software", "programmer", "developer", "web", "mobile", "app developer", "computer programmer"], courseTerms: ["software", "programming", "computer science", "computing", "information technology", "web", "mobile", "application development"] },
   { triggers: ["security", "cyber"], courseTerms: ["cyber", "security", "information security", "network security", "computing", "information technology"] },
-  { triggers: ["database", "data"], courseTerms: ["database", "data science", "data analytics", "analytics", "information technology", "computing"] },
+  { triggers: ["database", "data scientist", "data analyst", "data engineer", "analytics"], courseTerms: ["database", "data science", "data analytics", "analytics", "statistics", "information technology", "computing"] },
   { triggers: ["network", "cloud", "devops", "systems administrator", "systems architect"], courseTerms: ["network", "cloud", "devops", "systems", "infrastructure", "information technology", "computing"] },
   { triggers: ["business analyst", "systems analyst", "business and systems analyst"], courseTerms: ["business analytics", "business information systems", "information systems", "information technology", "business analysis", "analytics"] },
-  { triggers: ["project manager", "contract manager", "manager", "consultant"], courseTerms: ["project management", "information systems", "information technology", "management", "business", "enterprise"] },
+  { triggers: ["accountant", "auditor", "taxation", "bookkeeper"], courseTerms: ["accounting", "accountancy", "commerce", "business", "finance", "taxation", "audit"] },
+  { triggers: ["finance", "financial analyst", "investment", "economist", "banking"], courseTerms: ["finance", "financial", "economics", "commerce", "banking", "investment", "business"] },
+  { triggers: ["marketing", "advertising", "market research", "public relations", "communications"], courseTerms: ["marketing", "advertising", "public relations", "communications", "media", "business"] },
+  { triggers: ["human resources", "hr manager", "recruitment", "workplace relations"], courseTerms: ["human resource", "human resources", "management", "business", "employment relations", "workplace relations"] },
+  { triggers: ["project manager", "contract manager", "manager", "consultant"], courseTerms: ["project management", "management", "business", "commerce", "enterprise", "leadership"] },
+  { triggers: ["registered nurse", "nurse", "nursing"], courseTerms: ["nursing", "nurse", "clinical", "health", "midwifery"] },
+  { triggers: ["midwife", "midwifery"], courseTerms: ["midwifery", "nursing", "maternal", "health"] },
+  { triggers: ["physiotherapist", "physiotherapy", "physical therapist"], courseTerms: ["physiotherapy", "physical therapy", "rehabilitation", "health science", "allied health"] },
+  { triggers: ["occupational therapist", "occupational therapy"], courseTerms: ["occupational therapy", "rehabilitation", "allied health", "health science"] },
+  { triggers: ["psychologist", "psychology"], courseTerms: ["psychology", "psychological", "behavioural science", "behavioral science"] },
+  { triggers: ["social worker", "social work"], courseTerms: ["social work", "human services", "community services", "welfare"] },
+  { triggers: ["pharmacist", "pharmacy"], courseTerms: ["pharmacy", "pharmaceutical", "pharmacology", "health"] },
+  { triggers: ["dentist", "dental"], courseTerms: ["dentistry", "dental", "oral health"] },
+  { triggers: ["doctor", "medical practitioner", "physician", "surgeon", "medicine"], courseTerms: ["medicine", "medical", "clinical", "health science"] },
+  { triggers: ["radiographer", "medical imaging", "sonographer"], courseTerms: ["medical imaging", "radiography", "radiation", "sonography", "diagnostic imaging"] },
+  { triggers: ["nutritionist", "dietitian", "dietician", "nutrition"], courseTerms: ["nutrition", "dietetics", "dietetic", "food science", "health science"] },
+  { triggers: ["civil engineer", "structural engineer"], courseTerms: ["civil engineering", "structural engineering", "construction engineering", "engineering"] },
+  { triggers: ["mechanical engineer"], courseTerms: ["mechanical engineering", "mechatronic", "engineering"] },
+  { triggers: ["electrical engineer", "electronics engineer"], courseTerms: ["electrical engineering", "electronic engineering", "electronics", "engineering"] },
+  { triggers: ["chemical engineer", "process engineer"], courseTerms: ["chemical engineering", "process engineering", "engineering", "chemistry"] },
+  { triggers: ["environmental engineer"], courseTerms: ["environmental engineering", "environment", "sustainability", "engineering"] },
+  { triggers: ["mining engineer", "petroleum engineer"], courseTerms: ["mining engineering", "petroleum engineering", "resources engineering", "engineering"] },
+  { triggers: ["architect", "architecture"], courseTerms: ["architecture", "architectural", "built environment", "design"] },
+  { triggers: ["quantity surveyor", "surveyor", "construction manager"], courseTerms: ["quantity surveying", "surveying", "construction management", "construction", "built environment"] },
+  { triggers: ["urban planner", "town planner", "planner"], courseTerms: ["urban planning", "town planning", "planning", "built environment"] },
+  { triggers: ["teacher", "secondary teacher", "primary teacher", "early childhood teacher", "educator"], courseTerms: ["teaching", "education", "teacher", "early childhood", "primary education", "secondary education"] },
+  { triggers: ["lawyer", "solicitor", "barrister", "legal practitioner"], courseTerms: ["law", "legal", "juris doctor"] },
+  { triggers: ["criminologist", "criminology", "criminal justice"], courseTerms: ["criminology", "criminal justice", "justice", "law"] },
+  { triggers: ["scientist", "chemist", "physicist", "biologist", "microbiologist"], courseTerms: ["science", "chemistry", "physics", "biology", "biological science", "microbiology", "natural science"] },
+  { triggers: ["biomedical scientist", "medical laboratory scientist", "laboratory scientist"], courseTerms: ["biomedical science", "medical laboratory", "laboratory medicine", "medical science", "pathology"] },
+  { triggers: ["environmental scientist", "environmental consultant", "conservation scientist"], courseTerms: ["environmental science", "environment", "conservation", "sustainability", "ecology"] },
+  { triggers: ["agricultural scientist", "agronomist", "agriculture"], courseTerms: ["agriculture", "agricultural science", "agronomy", "plant science", "animal science"] },
+  { triggers: ["veterinarian", "veterinary"], courseTerms: ["veterinary", "veterinary science", "animal health"] },
+  { triggers: ["chef", "cook", "hospitality manager"], courseTerms: ["cookery", "culinary", "hospitality", "commercial cookery", "food service"] },
+  { triggers: ["electrician", "electrical trades"], courseTerms: ["electrotechnology", "electrical", "electrician", "trade"] },
+  { triggers: ["plumber", "plumbing"], courseTerms: ["plumbing", "construction", "building services", "trade"] },
+  { triggers: ["carpenter", "joiner", "carpentry"], courseTerms: ["carpentry", "building", "construction", "joinery", "trade"] },
+  { triggers: ["motor mechanic", "automotive mechanic", "mechanic", "automotive technician"], courseTerms: ["automotive", "mechanical technology", "vehicle", "mechanic", "trade"] },
+  { triggers: ["graphic designer", "designer", "illustrator"], courseTerms: ["graphic design", "design", "visual communication", "illustration", "creative arts"] },
+  { triggers: ["journalist", "writer", "editor", "media producer"], courseTerms: ["journalism", "media", "writing", "communications", "publishing"] },
+  { triggers: ["film", "television", "screen producer", "animator"], courseTerms: ["film", "television", "screen", "animation", "media", "creative arts"] },
 ];
 
 function inferredCareerScore(occupation: string, ...courseValues: Array<string | null | undefined>) {
@@ -400,7 +442,7 @@ export async function GET(request: NextRequest) {
       totalCandidates: allCourses.length,
       enrichedCandidates: courses.length,
       source: "SUPABASE_FULL_CATALOGUE",
-      careerMatching: "explicit_mappings_plus_inferred_course_text",
+      careerMatching: "expanded_multidomain_inference_plus_explicit_mappings",
       feeCoverage,
       feeMethod: "verified_course_fee_then_estimated_course_fee_then_course_record_then_cricos_tuition_total",
       diversity: {
