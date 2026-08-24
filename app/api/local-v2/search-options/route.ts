@@ -118,28 +118,44 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === "occupation") {
-      let oscaQuery = supabase
+      const { data: allOscaRows, error: oscaError } = await supabase
         .from("osca_occupations")
-        .select("id,code,name,classification_level,skill_level,source_url")
+        .select("id,code,name,classification_level,skill_level,alternative_titles,specialisations,source_url")
         .eq("classification_level", "occupation")
         .order("name")
-        .limit(q ? 120 : 100);
-      if (q) oscaQuery = oscaQuery.or(`name.ilike.%${q}%,code.ilike.%${q}%`);
-      const { data: oscaRows, error: oscaError } = await oscaQuery;
+        .limit(2000);
       if (oscaError) throw oscaError;
 
-      if ((oscaRows ?? []).length > 0) {
+      const queryText = q.toLowerCase();
+      const oscaRows = (allOscaRows ?? [])
+        .filter((row) => {
+          if (!q) return true;
+          if (row.name?.toLowerCase().includes(queryText) || row.code?.toLowerCase().includes(queryText)) return true;
+          if ((row.alternative_titles ?? []).some((title: string) => title.toLowerCase().includes(queryText))) return true;
+          return (row.specialisations ?? []).some((title: string) => title.toLowerCase().includes(queryText));
+        })
+        .slice(0, q ? 120 : 100);
+
+      if (oscaRows.length > 0) {
         source = "ABS_OSCA_2024";
         const seen = new Set<string>();
-        for (const row of oscaRows ?? []) {
+        for (const row of oscaRows) {
           const key = row.name.toLowerCase();
           if (seen.has(key)) continue;
           seen.add(key);
+          const matchedAlias = q
+            ? [...(row.alternative_titles ?? []), ...(row.specialisations ?? [])].find((title: string) => title.toLowerCase().includes(queryText))
+            : null;
           options.push({
             id: `osca:${row.code}`,
             label: row.name,
             value: row.name,
-            secondary: [`OSCA ${row.code}`, row.skill_level ? `Skill level ${row.skill_level}` : null, "Australian Bureau of Statistics"].filter(Boolean).join(" · "),
+            secondary: [
+              `OSCA ${row.code}`,
+              matchedAlias ? `Matched: ${matchedAlias}` : null,
+              row.skill_level ? `Skill level ${row.skill_level}` : null,
+              "Australian Bureau of Statistics",
+            ].filter(Boolean).join(" · "),
           });
         }
       } else {
