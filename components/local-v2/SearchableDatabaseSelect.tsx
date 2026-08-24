@@ -59,8 +59,24 @@ export function SearchableDatabaseSelect({
           `/api/local-v2/search-options?type=${encodeURIComponent(type)}&q=${encodeURIComponent(query)}`,
           { signal: controller.signal },
         );
-        const data = (await response.json()) as { options?: SearchOption[]; error?: string };
-        if (!response.ok) throw new Error(data.error || "Search failed.");
+
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.toLowerCase().includes("application/json")) {
+          const preview = (await response.text()).replace(/\s+/g, " ").slice(0, 120);
+          console.error("Quick Match search returned a non-JSON response", {
+            status: response.status,
+            contentType,
+            preview,
+          });
+          throw new Error(
+            response.status === 404
+              ? "Quick Match search API was not found. Restart the local development server after pulling the latest code."
+              : `Quick Match search API returned ${response.status || "an invalid response"}. Check the npm dev terminal for the server error.`,
+          );
+        }
+
+        const data = (await response.json()) as { options?: SearchOption[]; error?: string; detail?: string };
+        if (!response.ok) throw new Error(data.detail || data.error || "Search failed.");
         setOptions(data.options ?? []);
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
