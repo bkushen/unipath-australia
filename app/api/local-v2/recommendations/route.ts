@@ -100,19 +100,20 @@ type FeeRow = {
 
 function resolveCourseFees(course: CourseRow, override?: FeeRow) {
   const durationYears = course.duration_months ? Math.max(Number(course.duration_months) / 12, 1) : null;
+  const overrideStatus = override?.verification_status?.toUpperCase() ?? null;
 
-  if (override && (override.annual_fee != null || override.total_fee != null)) {
+  if (override && (overrideStatus === "VERIFIED" || overrideStatus === "ESTIMATED") && (override.annual_fee != null || override.total_fee != null)) {
     const totalFee = override.total_fee == null ? null : Number(override.total_fee);
     const annualFee = override.annual_fee != null ? Number(override.annual_fee) : totalFee && durationYears ? totalFee / durationYears : null;
     return {
       annualFee,
       totalFee,
       currency: override.currency || course.currency || "AUD",
-      source: "verified_course_fee" as const,
+      source: overrideStatus === "VERIFIED" ? "verified_course_fee" as const : "estimated_course_fee" as const,
       feeYear: override.fee_year,
       sourceUrl: override.source_url,
       verifiedAt: override.verified_at,
-      verificationStatus: override.verification_status,
+      verificationStatus: overrideStatus,
       derivedAnnual: override.annual_fee == null && annualFee != null,
     };
   }
@@ -209,7 +210,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ recommendations: [], totalCandidates: 0, enrichedCandidates: 0, source: "SUPABASE" });
     }
 
-    const feeCoverage = { verifiedCourseFee: 0, courseRecord: 0, cricosTuitionTotal: 0, unavailable: 0 };
+    const feeCoverage = { verifiedCourseFee: 0, estimatedCourseFee: 0, courseRecord: 0, cricosTuitionTotal: 0, unavailable: 0 };
     const preliminary = allCourses
       .map((course) => {
         const studyField = course.study_field_id ? fieldMap.get(course.study_field_id) ?? null : null;
@@ -217,12 +218,13 @@ export async function GET(request: NextRequest) {
         const career = inferredCareerScore(occupation, course.name, studyField, course.qualification_level);
         const fee = resolveCourseFees(course, latestInternationalFeeByCourse.get(course.id));
         if (fee.source === "verified_course_fee") feeCoverage.verifiedCourseFee += 1;
+        else if (fee.source === "estimated_course_fee") feeCoverage.estimatedCourseFee += 1;
         else if (fee.source === "course_record") feeCoverage.courseRecord += 1;
         else if (fee.source === "cricos_tuition_total") feeCoverage.cricosTuitionTotal += 1;
         else feeCoverage.unavailable += 1;
         const affordability = affordabilityScore(fee.totalFee, fee.annualFee, fullBudget, semesterBudget);
         const studyPreference = textScore(study, course.name, studyField);
-        const feeConfidenceAdjustment = fee.source === "unavailable" ? -3 : fee.source === "cricos_tuition_total" ? 0 : 2;
+        const feeConfidenceAdjustment = fee.source === "unavailable" ? -3 : fee.source === "cricos_tuition_total" ? -1 : fee.source === "estimated_course_fee" ? 0 : 2;
         const preliminaryScore = clamp(academic * 0.32 + career * 0.38 + affordability * 0.20 + studyPreference * 0.10 + feeConfidenceAdjustment);
         return { course, studyField, academic, career, affordability, preliminaryScore, fee };
       })
@@ -307,9 +309,9 @@ export async function GET(request: NextRequest) {
       const scholarshipBoost = scholarshipImportance === "high" ? (bestScholarship ? 8 : -10) : scholarshipImportance === "prefer" ? (bestScholarship ? 5 : 0) : 0;
       const migration = migrationByCourse.get(course.id) ?? 45;
       const migrationWeight = migrationImportance === "high" ? 0.2 : migrationImportance === "consider" ? 0.1 : 0;
-      const affordabilityWeight = base.fee.source === "unavailable" ? 0.10 : 0.20;
-      const redistributedAcademicWeight = base.fee.source === "unavailable" ? 0.31 : 0.26;
-      const redistributedCareerWeight = base.fee.source === "unavailable" ? 0.39 : 0.34;
+      const affordabilityWeight = base.fee.source === "unavailable" ? 0.10 : base.fee.source === "cricos_tuition_total" ? 0.14 : base.fee.source === "estimated_course_fee" ? 0.16 : 0.20;
+      const redistributedAcademicWeight = base.fee.source === "unavailable" ? 0.31 : base.fee.source === "cricos_tuition_total" ? 0.29 : base.fee.source === "estimated_course_fee" ? 0.28 : 0.26;
+      const redistributedCareerWeight = base.fee.source === "unavailable" ? 0.39 : base.fee.source === "cricos_tuition_total" ? 0.37 : base.fee.source === "estimated_course_fee" ? 0.36 : 0.34;
       const baseOverall = base.academic * redistributedAcademicWeight + career * redistributedCareerWeight + base.affordability * affordabilityWeight + bestCampus.score * 0.20;
       const overall = clamp(baseOverall * (1 - migrationWeight) + migration * migrationWeight + scholarshipBoost);
       const living = livingMap.get(bestCampus.campus.id) ?? null;
@@ -335,13 +337,19 @@ export async function GET(request: NextRequest) {
           sourceUrl: base.fee.sourceUrl,
           verifiedAt: base.fee.verifiedAt,
           verificationStatus: base.fee.verificationStatus,
-          note: base.fee.source === "cricos_tuition_total"
-            ? "Annual tuition is derived from the CRICOS total tuition amount and course duration."
-            : base.fee.source === "unavailable"
-              ? "No tuition amount is currently loaded, so affordability has reduced influence on this recommendation."
-              : base.fee.derivedAnnual
-                ? "Annual tuition is derived from a loaded total tuition amount and course duration."
-                : "A direct annual tuition amount is available.",
+          note: base.fee.source === "verified_course_fee"
+            ? (base.fee.derivedAnnual
+              ? "Verified fee evidence is loaded; the annual amount shown is derived from the loaded total and course duration."
+              : "Verified direct/source-supported tuition evidence is loaded for this course.")
+            : base.fee.source === "estimated_course_fee"
+              ? "Estimated tuition evidence is loaded for this course. Treat it as a planning estimate and confirm the current fee with the university before applying."
+              : base.fee.source === "cricos_tuition_total"
+                ? "Annual tuition is derived from the CRICOS total tuition amount and course duration; it is not presented as a verified direct annual fee."
+                : base.fee.source === "unavailable"
+                  ? "No tuition amount is currently loaded, so affordability has reduced influence on this recommendation."
+                  : base.fee.derivedAnnual
+                    ? "Annual tuition is derived from a loaded total tuition amount and course duration."
+                    : "A tuition amount is available in the course record; confirm the current international fee with the university.",
         },
         university: { id: university.id, name: university.name, website: university.website, logoUrl: university.logo_url, cricosCode: university.cricos_code },
         campus: bestCampus.campus,
@@ -394,7 +402,7 @@ export async function GET(request: NextRequest) {
       source: "SUPABASE_FULL_CATALOGUE",
       careerMatching: "explicit_mappings_plus_inferred_course_text",
       feeCoverage,
-      feeMethod: "verified_course_fee_then_course_record_then_cricos_tuition_total",
+      feeMethod: "verified_course_fee_then_estimated_course_fee_then_course_record_then_cricos_tuition_total",
       diversity: {
         primaryUniversityLimit: PRIMARY_UNIVERSITY_LIMIT,
         primaryCampusLimit: PRIMARY_CAMPUS_LIMIT,
