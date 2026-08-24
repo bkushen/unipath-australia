@@ -30,6 +30,17 @@ function textScore(query: string, ...values: Array<string | null | undefined>) {
 }
 
 type CareerDomain = { triggers: string[]; courseTerms: string[] };
+type OscaOccupationRow = {
+  code: string;
+  name: string;
+  classification_level: string;
+  description: string | null;
+  alternative_titles: string[] | null;
+  specialisations: string[] | null;
+  source_url: string | null;
+  source_release: string | null;
+  verified_at: string | null;
+};
 
 const careerDomains: CareerDomain[] = [
   { triggers: ["software", "programmer", "developer", "web", "mobile", "app developer", "computer programmer"], courseTerms: ["software", "programming", "computer science", "computing", "information technology", "web", "mobile", "application development"] },
@@ -80,10 +91,15 @@ const careerDomains: CareerDomain[] = [
   { triggers: ["film", "television", "screen producer", "animator"], courseTerms: ["film", "television", "screen", "animation", "media", "creative arts"] },
 ];
 
-function inferredCareerScore(occupation: string, ...courseValues: Array<string | null | undefined>) {
+function inferredCareerScore(occupation: string, oscaOccupation: OscaOccupationRow | null, ...courseValues: Array<string | null | undefined>) {
   if (!occupation.trim()) return 70;
   const direct = textScore(occupation, ...courseValues);
-  const occupationText = occupation.toLowerCase();
+  const occupationText = [
+    occupation,
+    oscaOccupation?.name,
+    ...(oscaOccupation?.alternative_titles ?? []),
+    ...(oscaOccupation?.specialisations ?? []),
+  ].filter(Boolean).join(" ").toLowerCase();
   const haystack = courseValues.filter(Boolean).join(" ").toLowerCase();
   let domainScore = 45;
   for (const domain of careerDomains) {
@@ -220,13 +236,25 @@ export async function GET(request: NextRequest) {
   const fullBudget = Number(params.get("fullBudget") ?? 80000);
 
   try {
-    const [{ data: studyFields, error: studyFieldError }, { data: feeRows, error: feeRowsError }] = await Promise.all([
+    const oscaLookup = occupation
+      ? supabase
+          .from("osca_occupations")
+          .select("code,name,classification_level,description,alternative_titles,specialisations,source_url,source_release,verified_at")
+          .eq("classification_level", "occupation")
+          .ilike("name", occupation)
+          .limit(1)
+      : Promise.resolve({ data: [], error: null });
+
+    const [{ data: studyFields, error: studyFieldError }, { data: feeRows, error: feeRowsError }, { data: oscaRows, error: oscaError }] = await Promise.all([
       supabase.from("study_fields").select("id,name"),
       supabase.from("course_fees").select("course_id,fee_year,student_type,annual_fee,total_fee,currency,source_url,verified_at,verification_status").order("fee_year", { ascending: false, nullsFirst: false }),
+      oscaLookup,
     ]);
     if (studyFieldError) throw studyFieldError;
     if (feeRowsError) throw feeRowsError;
+    if (oscaError) throw oscaError;
 
+    const oscaOccupation = ((oscaRows ?? [])[0] as OscaOccupationRow | undefined) ?? null;
     const fieldMap = new Map((studyFields ?? []).map((item) => [item.id, item.name]));
     const latestInternationalFeeByCourse = new Map<string, FeeRow>();
     for (const row of (feeRows ?? []) as FeeRow[]) {
@@ -257,7 +285,7 @@ export async function GET(request: NextRequest) {
       .map((course) => {
         const studyField = course.study_field_id ? fieldMap.get(course.study_field_id) ?? null : null;
         const academic = textScore(study || field, studyField, course.name, course.qualification_level);
-        const career = inferredCareerScore(occupation, course.name, studyField, course.qualification_level);
+        const career = inferredCareerScore(occupation, oscaOccupation, course.name, studyField, course.qualification_level);
         const fee = resolveCourseFees(course, latestInternationalFeeByCourse.get(course.id));
         if (fee.source === "verified_course_fee") feeCoverage.verifiedCourseFee += 1;
         else if (fee.source === "estimated_course_fee") feeCoverage.estimatedCourseFee += 1;
@@ -343,7 +371,11 @@ export async function GET(request: NextRequest) {
       const explicitCareerScores = occupationNames.map((name) => textScore(occupation, name));
       const bestExplicitCareerScore = explicitCareerScores.length ? Math.max(...explicitCareerScores) : null;
       const career = bestExplicitCareerScore == null ? base.career : Math.max(base.career, bestExplicitCareerScore);
-      const careerMatchSource = bestExplicitCareerScore != null && bestExplicitCareerScore >= base.career ? "explicit_mapping" : "inferred_text";
+      const careerMatchSource = bestExplicitCareerScore != null && bestExplicitCareerScore >= base.career
+        ? "explicit_mapping"
+        : oscaOccupation
+          ? "osca_metadata_inference"
+          : "inferred_text";
 
       const scholarshipIdsForCourse = scholarshipsByCourse.get(course.id) ?? [];
       const linkedScholarships = scholarshipIdsForCourse.map((id) => scholarshipMap.get(id)).filter(Boolean);
@@ -397,11 +429,16 @@ export async function GET(request: NextRequest) {
         campus: bestCampus.campus,
         scholarship: bestScholarship ? { id: bestScholarship.id, name: bestScholarship.name, percentage: bestScholarship.percentage == null ? null : Number(bestScholarship.percentage), amount: bestScholarship.amount == null ? null : Number(bestScholarship.amount) } : null,
         livingCost: living ? { weeklyLow: Number(living.weekly_low), weeklyHigh: Number(living.weekly_high), monthlyEstimate: Number(living.monthly_estimate), status: living.verification_status } : null,
-        careerMatch: { source: careerMatchSource, linkedOccupations: occupationNames },
+        careerMatch: {
+          source: careerMatchSource,
+          linkedOccupations: occupationNames,
+          oscaOccupation: oscaOccupation ? { code: oscaOccupation.code, name: oscaOccupation.name, sourceRelease: oscaOccupation.source_release } : null,
+        },
         scores: { academic: base.academic, career, affordability: base.affordability, location: bestCampus.score, migration, overall },
         reasons: [
           base.academic >= 80 ? "Strong study-field match." : null,
           career >= 80 && careerMatchSource === "explicit_mapping" ? "Strong career match from an explicit course-to-career mapping." : null,
+          career >= 80 && careerMatchSource === "osca_metadata_inference" ? "Strong career relevance inferred from the selected ABS OSCA occupation name and its official alternative titles/specialisations, compared with the course name and study field." : null,
           career >= 80 && careerMatchSource === "inferred_text" ? "Strong career relevance inferred from the course name and study field." : null,
           base.affordability >= 80 && base.fee.source !== "unavailable" ? "Tuition is within or close to the stated budget using available fee evidence." : null,
           base.fee.source === "unavailable" ? "Tuition is not loaded, so affordability is not treated as strong evidence for or against this course." : null,
@@ -442,7 +479,16 @@ export async function GET(request: NextRequest) {
       totalCandidates: allCourses.length,
       enrichedCandidates: courses.length,
       source: "SUPABASE_FULL_CATALOGUE",
-      careerMatching: "expanded_multidomain_inference_plus_explicit_mappings",
+      careerGoalEvidence: oscaOccupation ? {
+        source: "ABS_OSCA_2024",
+        code: oscaOccupation.code,
+        name: oscaOccupation.name,
+        sourceRelease: oscaOccupation.source_release,
+        sourceUrl: oscaOccupation.source_url,
+        verifiedAt: oscaOccupation.verified_at,
+        note: "OSCA identifies the occupation. Course relevance is still a UniPath inference unless an explicit course-to-career mapping is loaded.",
+      } : null,
+      careerMatching: oscaOccupation ? "osca_metadata_inference_plus_explicit_mappings" : "expanded_multidomain_inference_plus_explicit_mappings",
       feeCoverage,
       feeMethod: "verified_course_fee_then_estimated_course_fee_then_course_record_then_cricos_tuition_total",
       diversity: {
