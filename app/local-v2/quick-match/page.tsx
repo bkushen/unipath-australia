@@ -13,20 +13,20 @@ const money = (value: number | null | undefined, currency = "AUD") => value == n
 const initialProfile: StudentDecisionProfile = {
   mode: "quick",
   age: undefined,
-  highestQualification: "Bachelor",
-  qualificationField: "Information Technology",
+  highestQualification: "",
+  qualificationField: "",
   academicScorePercent: undefined,
   englishTestType: "none",
   englishScore: undefined,
-  desiredOccupation: "Software Engineer",
+  desiredOccupation: "",
   preferredStudy: "",
   preferredLocation: "",
-  annualTuitionBudgetCents: 4000000,
-  semesterTuitionBudgetCents: 2000000,
-  fullCourseBudgetCents: 8000000,
+  annualTuitionBudgetCents: 0,
+  semesterTuitionBudgetCents: 0,
+  fullCourseBudgetCents: 0,
   scholarshipImportance: "none",
-  totalFundsCents: 12000000,
-  preferredStates: ["VIC"],
+  totalFundsCents: 0,
+  preferredStates: [],
   regionalAccepted: true,
   migrationImportance: "none",
   skills: [],
@@ -60,6 +60,7 @@ export default function QuickMatchPage() {
   const [migrationResults, setMigrationResults] = useState<LiveRecommendation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [validationError, setValidationError] = useState("");
   const [aiMode, setAiMode] = useState("");
   const [aiMessage, setAiMessage] = useState("");
   const [migrationChoice, setMigrationChoice] = useState<MigrationImportance>("consider");
@@ -81,6 +82,41 @@ export default function QuickMatchPage() {
     setProfile((current) => ({ ...current, preferredLocation: option.value, preferredStates: state && states.includes(state) ? [state] : current.preferredStates }));
   };
 
+  const validateStep = (currentStep: QuickStep) => {
+    if (currentStep === 1) {
+      if (profile.age == null || !Number.isFinite(profile.age) || profile.age < 15 || profile.age > 100) return "Enter a valid age between 15 and 100.";
+      if (!profile.highestQualification.trim()) return "Select your highest qualification.";
+      if (!profile.qualificationField.trim()) return "Select your previous study field.";
+      if (!profile.desiredOccupation.trim()) return "Select your career goal.";
+    }
+    if (currentStep === 2) {
+      const semester = profile.semesterTuitionBudgetCents ?? 0;
+      const full = profile.fullCourseBudgetCents ?? 0;
+      if (semester <= 0) return "Enter your tuition budget for one semester.";
+      if (full <= 0) return "Enter your maximum full course budget.";
+      if (full < semester) return "Your full course budget should be at least as much as one semester budget.";
+    }
+    if (currentStep === 3 && !profile.preferredLocation?.trim() && profile.preferredStates.length === 0) {
+      return "Choose a preferred location or at least one state.";
+    }
+    return "";
+  };
+
+  const goNext = () => {
+    const problem = validateStep(step);
+    if (problem) {
+      setValidationError(problem);
+      return;
+    }
+    setValidationError("");
+    setStep((step + 1) as QuickStep);
+  };
+
+  const goBack = () => {
+    setValidationError("");
+    setStep(Math.max(1, step - 1) as QuickStep);
+  };
+
   const enrichWithAI = async (base: LiveRecommendation[], migrationImportance: MigrationImportance) => {
     if (!base.length) return base;
     const response = await fetch("/api/local-v2/ai-score", {
@@ -88,6 +124,7 @@ export default function QuickMatchPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         profile: {
+          age: profile.age ?? null,
           highestQualification: profile.highestQualification,
           qualificationField: profile.qualificationField,
           academicScorePercent: profile.academicScorePercent ?? null,
@@ -98,8 +135,8 @@ export default function QuickMatchPage() {
           preferredLocation: profile.preferredLocation ?? "",
           preferredStates: profile.preferredStates,
           regionalAccepted: profile.regionalAccepted,
-          semesterBudget: (profile.semesterTuitionBudgetCents ?? profile.annualTuitionBudgetCents / 2) / 100,
-          fullBudget: (profile.fullCourseBudgetCents ?? profile.annualTuitionBudgetCents * 2) / 100,
+          semesterBudget: (profile.semesterTuitionBudgetCents ?? 0) / 100,
+          fullBudget: (profile.fullCourseBudgetCents ?? 0) / 100,
           scholarshipImportance: profile.scholarshipImportance ?? "none",
           migrationImportance,
         },
@@ -129,8 +166,8 @@ export default function QuickMatchPage() {
         regionalAccepted: String(profile.regionalAccepted),
         migrationImportance,
         scholarshipImportance: profile.scholarshipImportance ?? "none",
-        semesterBudget: String((profile.semesterTuitionBudgetCents ?? profile.annualTuitionBudgetCents / 2) / 100),
-        fullBudget: String((profile.fullCourseBudgetCents ?? profile.annualTuitionBudgetCents * 2) / 100),
+        semesterBudget: String((profile.semesterTuitionBudgetCents ?? 0) / 100),
+        fullBudget: String((profile.fullCourseBudgetCents ?? 0) / 100),
       });
       const response = await fetch(`/api/local-v2/recommendations?${params.toString()}`);
       const data = await response.json() as { recommendations?: LiveRecommendation[]; detail?: string; error?: string };
@@ -145,10 +182,14 @@ export default function QuickMatchPage() {
     }
   };
 
-  const showQuickResult = async () => { setStage("result"); await loadRecommendations("none", "standard"); };
+  const showQuickResult = async () => {
+    setValidationError("");
+    setStage("result");
+    await loadRecommendations("none", "standard");
+  };
   const showDetailedResult = async () => { setStage("detailed-result"); await loadRecommendations("none", "standard"); };
   const showMigrationResult = async () => { setStage("migration-result"); await loadRecommendations(migrationChoice, "migration"); };
-  const reset = () => { clearLocalV2Profile(); setProfile(initialProfile); setStage("input"); setStep(1); setResults([]); setMigrationResults([]); setError(""); };
+  const reset = () => { clearLocalV2Profile(); setProfile(initialProfile); setStage("input"); setStep(1); setResults([]); setMigrationResults([]); setError(""); setValidationError(""); };
 
   return <main style={pageStyle}>
     <header style={{ marginBottom: 24 }}>
@@ -175,13 +216,14 @@ export default function QuickMatchPage() {
         <h2>Your budget</h2>
         <p style={mutedStyle}>Tell UniPath what tuition range is realistic for you.</p>
         <div style={gridStyle}>
-          <CurrencyBudgetInput label="Budget for one semester" audCents={profile.semesterTuitionBudgetCents ?? profile.annualTuitionBudgetCents / 2} onAudCentsChange={(semesterTuitionBudgetCents) => setProfile((c) => ({ ...c, semesterTuitionBudgetCents, annualTuitionBudgetCents: semesterTuitionBudgetCents * 2 }))} />
-          <CurrencyBudgetInput label="Maximum full course budget" audCents={profile.fullCourseBudgetCents ?? profile.annualTuitionBudgetCents * 2} onAudCentsChange={(fullCourseBudgetCents) => setProfile((c) => ({ ...c, fullCourseBudgetCents }))} />
+          <CurrencyBudgetInput label="Budget for one semester" audCents={profile.semesterTuitionBudgetCents ?? 0} onAudCentsChange={(semesterTuitionBudgetCents) => setProfile((c) => ({ ...c, semesterTuitionBudgetCents, annualTuitionBudgetCents: semesterTuitionBudgetCents * 2 }))} />
+          <CurrencyBudgetInput label="Maximum full course budget" audCents={profile.fullCourseBudgetCents ?? 0} onAudCentsChange={(fullCourseBudgetCents) => setProfile((c) => ({ ...c, fullCourseBudgetCents }))} />
         </div>
       </div>}
 
       {step === 3 && <div style={panelStyle}>
         <h2>Your location</h2>
+        <p style={mutedStyle}>Choose a city or select one or more states if you are flexible.</p>
         <SearchableDatabaseSelect label="Preferred location" type="location" value={profile.preferredLocation ?? ""} placeholder="e.g. Melbourne, Ballarat, Sydney" onChange={(preferredLocation) => setProfile((c) => ({ ...c, preferredLocation }))} onSelect={selectLocation} />
         <div style={{ marginTop: 20 }}><strong>Preferred state(s)</strong><div style={pillRowStyle}>{states.map((state) => <button key={state} type="button" onClick={() => updateState(state)} style={{ ...pillStyle, ...(profile.preferredStates.includes(state) ? selectedPillStyle : {}) }}>{state}</button>)}</div></div>
         <div style={{ marginTop: 20 }}><strong>Open to regional Australia?</strong><div style={pillRowStyle}><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: true }))} style={{ ...pillStyle, ...(profile.regionalAccepted ? selectedPillStyle : {}) }}>Yes</button><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: false }))} style={{ ...pillStyle, ...(!profile.regionalAccepted ? selectedPillStyle : {}) }}>No</button></div></div>
@@ -198,7 +240,8 @@ export default function QuickMatchPage() {
         <div style={{ marginTop: 20 }}><strong>Scholarship preference <span style={optionalLabelStyle}>Optional</span></strong><div style={pillRowStyle}>{([['high','Very important'],['prefer','Prefer if available'],['none','No preference']] as [ScholarshipImportance,string][]).map(([value,label]) => <button key={value} type="button" onClick={() => setProfile((c) => ({ ...c, scholarshipImportance: value }))} style={{ ...pillStyle, ...((profile.scholarshipImportance ?? "none") === value ? selectedPillStyle : {}) }}>{label}</button>)}</div></div>
       </div>}
 
-      <div style={footerStyle}><button type="button" disabled={step === 1} onClick={() => setStep(Math.max(1, step - 1) as QuickStep)} style={secondaryButtonStyle}>← Back</button>{step < 4 ? <button type="button" onClick={() => setStep((step + 1) as QuickStep)} style={primaryButtonStyle}>Continue →</button> : <button type="button" onClick={showQuickResult} style={primaryButtonStyle}>Get Match Score →</button>}</div>
+      {validationError && <div style={errorStyle}>{validationError}</div>}
+      <div style={footerStyle}><button type="button" disabled={step === 1} onClick={goBack} style={secondaryButtonStyle}>← Back</button>{step < 4 ? <button type="button" onClick={goNext} style={primaryButtonStyle}>Continue →</button> : <button type="button" onClick={showQuickResult} style={primaryButtonStyle}>Get Match Score →</button>}</div>
     </section>}
 
     {(stage === "result" || stage === "detailed-result") && <><section style={sectionStyle}><div style={eyebrowStyle}>SMART-SCORED LIVE RESULT</div><h2>Your best matches</h2><p style={mutedStyle}>The match score is decision support, not an admission guarantee. Missing course requirements are shown as unverified rather than guessed.</p>{aiMessage && <div style={infoBannerStyle}><strong>{aiMode === "openai" ? "Optional AI scoring active" : "Free transparent scoring"}:</strong> {aiMessage}</div>}{loading ? <p>Finding live courses and calculating match scores…</p> : error ? <ErrorBox text={error} /> : <ResultCards results={results} />}</section>{stage === "result" && <section style={{ ...sectionStyle, marginTop: 16 }}><h2>Want a more detailed result?</h2><p style={mutedStyle}>Add funds, experience, skills and dependants without losing your Quick Match answers.</p><button type="button" onClick={() => setStage("detailed")} style={primaryButtonStyle}>Continue to Detailed Assessment</button></section>}<MigrationPrompt choice={migrationChoice} setChoice={setMigrationChoice} onContinue={showMigrationResult} /></>}
