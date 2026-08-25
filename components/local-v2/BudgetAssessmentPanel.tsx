@@ -23,14 +23,15 @@ function statusStyle(status: "within_budget" | "over_budget" | "not_assessed") {
   return neutralStyle;
 }
 
-export function BudgetAssessmentPanel({ semesterBudget, fullCourseBudget, annualFee, totalFee, durationMonths, currency = "AUD", feeSource, derivedAnnual }: Props) {
+export function BudgetAssessmentPanel({ semesterBudget, fullCourseBudget, annualFee, totalFee, durationMonths, currency, feeSource, derivedAnnual }: Props) {
+  const displayCurrency = currency || "AUD";
   const assessment = assessCourseBudget({
     semesterBudget,
     fullCourseBudget,
     annualFee,
     totalFee,
     durationMonths,
-    currency,
+    currency: displayCurrency,
     feeSource: feeSource ?? null,
     derivedAnnual: derivedAnnual ?? null,
   });
@@ -50,22 +51,22 @@ export function BudgetAssessmentPanel({ semesterBudget, fullCourseBudget, annual
     <div style={gridStyle}>
       <div style={boxStyle}>
         <div style={labelStyle}>One semester</div>
-        <div style={rowStyle}><span>Your budget</span><strong>{money(semesterBudget, currency)}</strong></div>
-        <div style={rowStyle}><span>Estimated tuition</span><strong>{money(assessment.semester.tuition, currency)}</strong></div>
+        <div style={rowStyle}><span>Your budget</span><strong>{money(semesterBudget, displayCurrency)}</strong></div>
+        <div style={rowStyle}><span>Estimated tuition</span><strong>{money(assessment.semester.tuition, displayCurrency)}</strong></div>
         <div style={statusStyle(assessment.semester.status)}>
           {assessment.semester.status === "within_budget" ? "✓ " : assessment.semester.status === "over_budget" ? "↑ " : ""}
-          {assessment.semester.difference == null ? assessment.semester.label : `${money(Math.abs(assessment.semester.difference), currency)} ${assessment.semester.status === "within_budget" ? "under budget" : "over budget"}`}
+          {assessment.semester.difference == null ? assessment.semester.label : `${money(Math.abs(assessment.semester.difference), displayCurrency)} ${assessment.semester.status === "within_budget" ? "under budget" : "over budget"}`}
         </div>
         <div style={basisStyle}>{assessment.semester.basis}</div>
       </div>
 
       <div style={boxStyle}>
         <div style={labelStyle}>Full course</div>
-        <div style={rowStyle}><span>Your budget</span><strong>{money(fullCourseBudget, currency)}</strong></div>
-        <div style={rowStyle}><span>Tuition used</span><strong>{money(assessment.fullCourse.tuition, currency)}</strong></div>
+        <div style={rowStyle}><span>Your budget</span><strong>{money(fullCourseBudget, displayCurrency)}</strong></div>
+        <div style={rowStyle}><span>Tuition used</span><strong>{money(assessment.fullCourse.tuition, displayCurrency)}</strong></div>
         <div style={statusStyle(assessment.fullCourse.status)}>
           {assessment.fullCourse.status === "within_budget" ? "✓ " : assessment.fullCourse.status === "over_budget" ? "↑ " : ""}
-          {assessment.fullCourse.difference == null ? assessment.fullCourse.label : `${money(Math.abs(assessment.fullCourse.difference), currency)} ${assessment.fullCourse.status === "within_budget" ? "under budget" : "over budget"}`}
+          {assessment.fullCourse.difference == null ? assessment.fullCourse.label : `${money(Math.abs(assessment.fullCourse.difference), displayCurrency)} ${assessment.fullCourse.status === "within_budget" ? "under budget" : "over budget"}`}
         </div>
         <div style={basisStyle}>{assessment.fullCourse.basis}</div>
       </div>
