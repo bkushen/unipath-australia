@@ -215,6 +215,12 @@ function fieldRelated(previousField: string | undefined, candidate: Candidate, r
   return previous.some((word) => word.length >= 4 && target.includes(word));
 }
 
+function applyCareerGate(score: number, careerScore: number) {
+  if (careerScore <= 35) return Math.min(score, 60);
+  if (careerScore < 50) return Math.min(score, 68);
+  return score;
+}
+
 function fallbackScore(candidate: Candidate, requirement: EntryRequirement | undefined, profile: Profile, priorQualification?: PriorQualificationMetadata | null) {
   const reasons: string[] = [];
   const cautions: string[] = [];
@@ -310,7 +316,7 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
     cautions.push("Course-specific academic and English entry requirements are not yet verified in UniPath.");
   }
 
-  const baseFit = clamp(candidate.scores.overall * 0.45 + candidate.scores.career * 0.18 + candidate.scores.academic * 0.12 + candidate.scores.affordability * 0.10 + candidate.scores.location * 0.10 + candidate.scores.migration * 0.05);
+  const baseFit = clamp(candidate.scores.overall * 0.42 + candidate.scores.career * 0.23 + candidate.scores.academic * 0.11 + candidate.scores.affordability * 0.09 + candidate.scores.location * 0.10 + candidate.scores.migration * 0.05);
   const eligibilityEvidence = requirement ? clamp(readiness.score * 0.25 + academicEvidenceScore * 0.30 + englishEvidenceScore * 0.30 + fieldEvidenceScore * 0.15) : clamp(readiness.score * 0.45 + 55 * 0.55);
 
   let preferenceAdjustment = 0;
@@ -319,9 +325,21 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
   if (profile.regionalAccepted === false && candidate.campus.regional) preferenceAdjustment -= 5;
   if (profile.migrationImportance === "high" && candidate.scores.migration >= 75) preferenceAdjustment += 3;
 
+  let careerAdjustment = 0;
+  if (candidate.scores.career >= 85) careerAdjustment += 2;
+  else if (candidate.scores.career < 50) careerAdjustment -= 8;
+  if (candidate.scores.career <= 35) careerAdjustment -= 8;
+
   const evidenceWeight = requirement ? 0.35 : 0.20;
-  const finalScore = clamp(baseFit * (1 - evidenceWeight) + eligibilityEvidence * evidenceWeight + preferenceAdjustment);
+  const rawFinalScore = clamp(baseFit * (1 - evidenceWeight) + eligibilityEvidence * evidenceWeight + preferenceAdjustment + careerAdjustment);
+  const finalScore = applyCareerGate(rawFinalScore, candidate.scores.career);
   const confidence = requirement ? (verifiedChecks >= 2 && unresolvedChecks === 0 ? "high" : "medium") : "low";
+
+  if (candidate.scores.career <= 35) {
+    cautions.push("Career relevance is too weak for this career goal, so UniPath capped the final match score even if budget or location fit is strong.");
+  } else if (candidate.scores.career < 50) {
+    cautions.push("Career relevance is weak, so this course is deliberately prevented from outranking substantially more career-relevant options on budget or location alone.");
+  }
 
   const feeEvidence = candidate.feeEvidence;
   if (feeEvidence?.source === "verified_course_fee") reasons.push(`Tuition evidence: verified${feeEvidence.feeYear ? ` ${feeEvidence.feeYear}` : ""} course-fee evidence is loaded${feeEvidence.derivedAnnual ? "; the annual amount is derived from the loaded total and duration" : ""}.`);
@@ -391,11 +409,12 @@ export async function POST(request: NextRequest) {
 
     const priorQualification = ((priorRows ?? [])[0] as PriorQualificationMetadata | undefined) ?? null;
     const requirementMap = new Map((entryRows ?? []).map((row) => [row.course_id, row as EntryRequirement]));
+    const candidateMap = new Map(candidates.map((candidate) => [candidate.course.id, candidate]));
     const fallback = candidates.map((candidate) => fallbackScore(candidate, requirementMap.get(candidate.course.id), profile, priorQualification));
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ results: fallback, mode: "explainable_fallback", model: null, message: "UniPath used its free transparent scoring engine: live course fit plus source-backed eligibility evidence where available." });
+      return NextResponse.json({ results: fallback, mode: "explainable_fallback", model: null, message: "UniPath used its free transparent scoring engine: career-first live course fit plus source-backed eligibility evidence where available." });
     }
 
     const compactCandidates = candidates.map((candidate) => ({
@@ -421,7 +440,7 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, database-backed prior-qualification metadata, live course data, fee evidence, OSCA career evidence, and source-backed entry requirements. Respect fee-evidence quality: verified direct/source-supported fees are stronger than estimates or derived CRICOS annualisations, and unavailable fees must not be treated as evidence that a course is affordable. Qualification-level progression is only a fit signal and must never be treated as proof of admission eligibility. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
+        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, database-backed prior-qualification metadata, live course data, fee evidence, OSCA career evidence, and source-backed entry requirements. Career relevance is a gating factor: a weak career score must not be rescued by cheap tuition, scholarship, location or generic academic relevance. Respect fee-evidence quality: verified direct/source-supported fees are stronger than estimates or derived CRICOS annualisations, and unavailable fees must not be treated as evidence that a course is affordable. Qualification-level progression is only a fit signal and must never be treated as proof of admission eligibility. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
         input: JSON.stringify({ profile, priorQualificationMetadata: priorQualification, candidates: compactCandidates }),
         text: { format: { type: "json_schema", name: "unipath_ai_scores", strict: true, schema: { type: "object", additionalProperties: false, properties: { results: { type: "array", items: { type: "object", additionalProperties: false, properties: { courseId: { type: "string" }, aiScore: { type: "integer", minimum: 0, maximum: 100 }, eligibilityStatus: { type: "string", enum: ["likely_meets", "needs_review", "requirements_not_verified"] }, reasons: { type: "array", items: { type: "string" }, maxItems: 4 }, cautions: { type: "array", items: { type: "string" }, maxItems: 4 } }, required: ["courseId", "aiScore", "eligibilityStatus", "reasons", "cautions"] } } }, required: ["results"] } } }
       }),
@@ -441,10 +460,13 @@ export async function POST(request: NextRequest) {
     const aiMap = new Map((parsed.results ?? []).map((item) => [item.courseId, item]));
     const results = fallback.map((fallbackItem) => {
       const ai = aiMap.get(fallbackItem.courseId);
-      return ai ? { ...fallbackItem, ...ai, entryRequirement: fallbackItem.entryRequirement } : fallbackItem;
+      const candidate = candidateMap.get(fallbackItem.courseId);
+      return ai && candidate
+        ? { ...fallbackItem, ...ai, aiScore: applyCareerGate(ai.aiScore, candidate.scores.career), entryRequirement: fallbackItem.entryRequirement }
+        : fallbackItem;
     });
 
-    return NextResponse.json({ results, mode: "openai", model, message: "AI score combines the live UniPath ranking with the evidence supplied to the model." });
+    return NextResponse.json({ results, mode: "openai", model, message: "AI score combines the live UniPath ranking with the evidence supplied to the model, with career relevance kept as a hard ranking guardrail." });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("AI scoring failed", detail);
