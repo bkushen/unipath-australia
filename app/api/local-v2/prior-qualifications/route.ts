@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabase();
     let query = supabase
       .from("prior_qualification_levels")
-      .select("id,code,label,rank_order,category,description")
+      .select("id,code,label,rank_order,category,description,scoring_kind,progression_rank,progression_note")
       .eq("active", true)
       .order("rank_order", { ascending: true });
 
@@ -35,12 +35,20 @@ export async function GET(request: NextRequest) {
       label: row.label,
       value: row.label,
       secondary: row.description || `Prior qualification · ${row.category}`,
+      metadata: {
+        code: row.code,
+        category: row.category,
+        scoringKind: row.scoring_kind,
+        progressionRank: row.progression_rank,
+        progressionNote: row.progression_note,
+      },
     }));
 
     return NextResponse.json({
       options,
       count: options.length,
       source: "SUPABASE_PRIOR_QUALIFICATION_LEVELS",
+      scoringMetadata: "SUPABASE_PRIOR_QUALIFICATION_PROGRESSION",
       query: q,
     });
   } catch (error) {
