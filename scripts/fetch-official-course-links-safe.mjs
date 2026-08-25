@@ -26,7 +26,7 @@ if (!Number.isInteger(maxSitemapFiles) || maxSitemapFiles < 1 || maxSitemapFiles
 if (!Number.isInteger(maxCandidatePages) || maxCandidatePages < 2 || maxCandidatePages > 15) throw new Error("--max-candidates must be an integer between 2 and 15.");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const USER_AGENT = "UniPathAustralia/0.5 (+https://github.com/bkushen/unipath-australia; official university course-link verification)";
+const USER_AGENT = "UniPathAustralia/0.6 (+https://github.com/bkushen/unipath-australia; official university course-link verification)";
 const STOP_WORDS = new Set(["a","an","and","at","for","in","of","on","or","the","to","with","by","from","into","study","course","courses","program","programs","degree","degrees","honours","honor","international"]);
 const COURSE_PATH_HINTS = ["/course","/courses","/study","/degrees","/degree","/program","/programs","/undergraduate","/postgraduate","/bachelor","/master","/masters","/diploma","/certificate"];
 const EXCLUDED_PATH_HINTS = ["/news","/events","/research/news","/staff","/people","/profiles","/alumni","/library","/contact","/about","/media","/blog","/article","/articles","/entry-requirements","/inherent-requirements"];
@@ -146,6 +146,21 @@ function canonicalPageUrl(value) {
 function specialisationExtras(courseName, headline) {
   const courseTokens = new Set(tokens(courseName));
   return [...new Set(tokens(headline).filter((token) => SPECIALISATION_TERMS.has(token) && !courseTokens.has(token)))];
+}
+function pageIdentityText(item) {
+  return normaliseText(item.h1 || item.title || urlText(new URL(item.url)));
+}
+function sameCourseIdentity(a, b) {
+  const aIdentity = pageIdentityText(a);
+  const bIdentity = pageIdentityText(b);
+  if (aIdentity && bIdentity && aIdentity === bIdentity) return true;
+
+  const aSpecs = [...new Set(specialisationExtras("", `${a.h1} ${a.title} ${urlText(new URL(a.url))}`))].sort();
+  const bSpecs = [...new Set(specialisationExtras("", `${b.h1} ${b.title} ${urlText(new URL(b.url))}`))].sort();
+  const sameSpecs = aSpecs.join("|") === bSpecs.join("|");
+  const identitySimilarity = tokenJaccard(aIdentity, bIdentity);
+
+  return sameSpecs && identitySimilarity >= 0.90;
 }
 
 async function fetchText(url, accept = "text/html,application/xhtml+xml,application/xml,text/xml,text/plain") {
@@ -345,17 +360,22 @@ async function verifyCourse(course, candidateUrls, allowedHosts) {
   ];
 
   for (const [kind, bodyKey, headlineKey] of identifierChecks) {
-    const pages = evaluated.filter((item) => {
+    const competingPages = evaluated.filter((item) => {
+      if (canonicalPageUrl(item.url) === canonicalPageUrl(best.url)) return false;
       if (!item[bodyKey]) return false;
       if (!qualifiesAsIndependentCollisionPage(item)) return false;
-      // A second page is collision evidence only when it independently looks like
-      // this exact course. A code mentioned in related-course/navigation text is not enough.
-      return item[headlineKey] || item.exactHeadline || item.headlineCoverage >= 0.95;
+      if (!(item[headlineKey] || item.exactHeadline || item.headlineCoverage >= 0.95)) return false;
+      // Different URLs are not automatically different courses. RMIT and other
+      // universities can publish duplicate/local/international views of the same
+      // course. Only treat a second page as a collision when its course identity
+      // is materially different from the best page.
+      return !sameCourseIdentity(best, item);
     });
-    const distinct = [...new Set(pages.map((item) => canonicalPageUrl(item.url)))];
-    if (distinct.length > 1) {
+
+    if (competingPages.length) {
       collisionKinds.push(kind);
-      distinct.forEach((url) => collisionUrls.add(url));
+      collisionUrls.add(canonicalPageUrl(best.url));
+      competingPages.forEach((item) => collisionUrls.add(canonicalPageUrl(item.url)));
     }
   }
 
