@@ -40,8 +40,9 @@ const initialProfile: StudentDecisionProfile = {
 type Stage = "input" | "result" | "detailed" | "detailed-result" | "migration-result";
 type QuickStep = 1 | 2 | 3 | 4;
 type EntryRequirement = { course_id: string; academic_text: string | null; minimum_gpa: number | string | null; relevant_field_required: boolean | null; ielts_overall: number | string | null; pte_overall: number | string | null; source_url: string | null; verified_at: string | null };
+type EntryEvidence = { level: "source_backed" | "partial" | "loaded_unverified" | "not_loaded"; label: string; sourceBacked: boolean; checkedFields: number; note: string };
 type ScoreBreakdown = { baseCourseFit: number; qualificationReadiness: number; academicEvidence: number; englishEvidence: number; fieldEvidence: number; eligibilityEvidence: number };
-type AIScore = { courseId: string; aiScore: number; eligibilityStatus: "likely_meets" | "needs_review" | "requirements_not_verified"; confidence?: "high" | "medium" | "low"; scoreBreakdown?: ScoreBreakdown; reasons: string[]; cautions: string[]; entryRequirement: EntryRequirement | null };
+type AIScore = { courseId: string; aiScore: number; eligibilityStatus: "likely_meets" | "needs_review" | "requirements_not_verified"; confidence?: "high" | "medium" | "low"; entryEvidence?: EntryEvidence; scoreBreakdown?: ScoreBreakdown; reasons: string[]; cautions: string[]; entryRequirement: EntryRequirement | null };
 type FeeEvidence = {
   source: "verified_course_fee" | "estimated_course_fee" | "course_record" | "cricos_tuition_total" | "unavailable" | string;
   feeYear: number | null;
@@ -316,6 +317,13 @@ function careerEvidencePresentation(match?: CareerMatch) {
   return { label: "UniPath text inference", style: careerEvidenceNeutralStyle, note: "Career relevance was inferred from course and study-field text because no stronger structured mapping was available." };
 }
 
+function entryEvidencePresentation(evidence?: EntryEvidence) {
+  if (!evidence || evidence.level === "not_loaded") return { label: "Requirements not loaded", style: entryEvidenceMissingStyle, note: evidence?.note ?? "No course-specific entry requirement record is currently loaded. UniPath lowers confidence instead of guessing eligibility." };
+  if (evidence.level === "source_backed") return { label: evidence.label, style: entryEvidenceVerifiedStyle, note: evidence.note };
+  if (evidence.level === "partial") return { label: evidence.label, style: entryEvidencePartialStyle, note: evidence.note };
+  return { label: evidence.label, style: entryEvidenceNeutralStyle, note: evidence.note };
+}
+
 function ResultCards({ results, highestQualification, semesterBudget, fullCourseBudget }: { results: LiveRecommendation[]; highestQualification: string; semesterBudget: number; fullCourseBudget: number }) {
   if (!results.length) return <div style={emptyStyle}>No live course records matched these preferences. Try a broader study area or location.</div>;
   return <div style={{ display: "grid", gap: 16, marginTop: 18 }}>{results.slice(0, 8).map((item, index) => {
@@ -327,9 +335,11 @@ function ResultCards({ results, highestQualification, semesterBudget, fullCourse
     const progressionLabel = progressionScore == null ? "Not assessed" : progressionScore >= 80 ? "Strong level fit" : progressionScore >= 70 ? "Reasonable level fit" : progressionScore >= 60 ? "Pathway / requirements check" : "Closer review needed";
     const feeEvidence = feeEvidencePresentation(item.feeEvidence);
     const careerEvidence = careerEvidencePresentation(item.careerMatch);
+    const entryEvidence = entryEvidencePresentation(item.ai?.entryEvidence);
     const osca = item.careerMatch?.oscaOccupation;
     return <article key={item.course.id} style={cardStyle}><div style={topRowStyle}><div><div style={rankStyle}>#{index + 1} {index === 0 ? "Best match" : "Alternative"}</div><h3 style={{ fontSize: 23, margin: "6px 0" }}>{item.course.name}</h3><div style={{ fontWeight: 800, color: "#0057b8" }}>{item.university.name}</div><div style={mutedStyle}>{item.campus.name}{item.campus.city ? ` · ${item.campus.city}` : ""}{item.campus.state ? `, ${item.campus.state}` : ""} {item.campus.regional ? "· Regional" : ""}</div></div><div style={scoreStyle}><div style={{ fontSize: 11 }}>MATCH SCORE</div>{score}%</div></div>
       <div style={status === "likely_meets" ? successStyle : status === "needs_review" ? warningStyle : neutralStyle}><strong>{statusLabel}</strong>{confidenceLabel && <span> · {confidenceLabel}</span>}{item.ai?.entryRequirement?.source_url && <a href={item.ai.entryRequirement.source_url} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>source ↗</a>}</div>
+      <div style={entryEvidencePanelStyle}><div style={qualificationTopStyle}><strong>Entry requirement evidence</strong><span style={entryEvidence.style}>{entryEvidence.label}</span></div><div style={entryEvidenceMetaStyle}><span>{item.ai?.entryEvidence ? `${item.ai.entryEvidence.checkedFields} structured field${item.ai.entryEvidence.checkedFields === 1 ? "" : "s"} loaded` : "No structured requirement fields returned"}</span>{item.ai?.entryRequirement?.verified_at && <span>Verified {new Date(item.ai.entryRequirement.verified_at).toLocaleDateString("en-AU")}</span>}</div><div style={qualificationNoteStyle}>{entryEvidence.note} This evidence classification supports confidence and ranking only; it is not an admission decision.{item.ai?.entryRequirement?.source_url && <a href={item.ai.entryRequirement.source_url} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>entry source ↗</a>}</div></div>
       <div style={qualificationProgressStyle}><div style={qualificationTopStyle}><strong>Qualification progression</strong><span style={qualificationBadgeStyle}>{progressionLabel}{progressionScore != null ? ` · ${progressionScore}%` : ""}</span></div><div style={qualificationPathStyle}><span>{highestQualification || "Not entered"}</span><span aria-hidden="true">→</span><span>{item.course.qualificationLevel || "Course level not loaded"}</span></div><div style={qualificationNoteStyle}>This measures study-level progression fit only. It is not proof of admission, credit, advanced standing or eligibility.</div></div>
       <div style={careerEvidencePanelStyle}><div style={qualificationTopStyle}><strong>Career evidence</strong><span style={careerEvidence.style}>{careerEvidence.label}</span></div>{osca && <div style={careerPathStyle}><span>{osca.name}</span><span style={oscaCodeStyle}>OSCA {osca.code}</span>{osca.sourceRelease && <span style={careerSourceStyle}>{osca.sourceRelease}</span>}</div>}<div style={qualificationNoteStyle}>{careerEvidence.note}{item.careerMatch?.linkedOccupations?.length ? ` Linked UniPath occupation records: ${item.careerMatch.linkedOccupations.slice(0, 3).join(", ")}${item.careerMatch.linkedOccupations.length > 3 ? "…" : ""}.` : ""}</div></div>
       <div style={scoreGridStyle}><span>Course relevance <strong>{item.scores.academic}%</strong></span><span>Career <strong>{item.scores.career}%</strong></span><span>Budget <strong>{item.scores.affordability}%</strong></span><span>Location <strong>{item.scores.location}%</strong></span><span>Base score <strong>{item.scores.overall}%</strong></span>{item.ai?.scoreBreakdown && <span>Eligibility evidence <strong>{item.ai.scoreBreakdown.eligibilityEvidence}%</strong></span>}</div>
@@ -381,6 +391,12 @@ const scoreGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,
 const feeGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginTop: 10 } as const;
 const infoStyle = { border: "1px solid #e3e7ee", borderRadius: 10, padding: 11, background: "#fff" } as const;
 const infoLabelStyle = { color: "#667085", fontSize: 12, marginBottom: 4 } as const;
+const entryEvidencePanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #d7e3f4", background: "#fcfdff" } as const;
+const entryEvidenceMetaStyle = { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8, color: "#475467", fontSize: 12, fontWeight: 700 } as const;
+const entryEvidenceVerifiedStyle = { fontSize: 12, fontWeight: 850, color: "#067647", background: "#ecfdf3", border: "1px solid #abefc6", borderRadius: 999, padding: "4px 8px" } as const;
+const entryEvidencePartialStyle = { fontSize: 12, fontWeight: 850, color: "#9a6700", background: "#fffaeb", border: "1px solid #fedf89", borderRadius: 999, padding: "4px 8px" } as const;
+const entryEvidenceNeutralStyle = { fontSize: 12, fontWeight: 850, color: "#475467", background: "#f8fafc", border: "1px solid #d0d5dd", borderRadius: 999, padding: "4px 8px" } as const;
+const entryEvidenceMissingStyle = { fontSize: 12, fontWeight: 850, color: "#b42318", background: "#fff6f5", border: "1px solid #fecdca", borderRadius: 999, padding: "4px 8px" } as const;
 const qualificationProgressStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #d7e3f4", background: "#f7faff" } as const;
 const qualificationTopStyle = { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" } as const;
 const qualificationBadgeStyle = { fontSize: 12, fontWeight: 850, color: "#0057b8", background: "#eaf3ff", borderRadius: 999, padding: "4px 8px" } as const;
