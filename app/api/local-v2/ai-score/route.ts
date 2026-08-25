@@ -6,6 +6,15 @@ type Candidate = {
   university: { name: string };
   campus: { city?: string | null; state?: string | null; regional?: boolean | null };
   scholarship?: { name: string; percentage?: number | null; amount?: number | null } | null;
+  feeEvidence?: {
+    source?: "verified_course_fee" | "estimated_course_fee" | "course_record" | "cricos_tuition_total" | "unavailable" | string;
+    feeYear?: number | null;
+    derivedAnnual?: boolean | null;
+    sourceUrl?: string | null;
+    verifiedAt?: string | null;
+    verificationStatus?: string | null;
+    note?: string | null;
+  } | null;
   careerMatch?: {
     source?: "explicit_mapping" | "osca_metadata_inference" | "inferred_text" | string;
     linkedOccupations?: string[];
@@ -324,6 +333,19 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
   const finalScore = clamp(baseFit * (1 - evidenceWeight) + eligibilityEvidence * evidenceWeight + preferenceAdjustment);
   const confidence = requirement ? (verifiedChecks >= 2 && unresolvedChecks === 0 ? "high" : "medium") : "low";
 
+  const feeEvidence = candidate.feeEvidence;
+  if (feeEvidence?.source === "verified_course_fee") {
+    reasons.push(`Tuition evidence: verified${feeEvidence.feeYear ? ` ${feeEvidence.feeYear}` : ""} course-fee evidence is loaded${feeEvidence.derivedAnnual ? "; the annual amount is derived from the loaded total and duration" : ""}.`);
+  } else if (feeEvidence?.source === "estimated_course_fee") {
+    cautions.push(`Tuition evidence: the loaded fee is an estimate${feeEvidence.feeYear ? ` for ${feeEvidence.feeYear}` : ""}; confirm the current international fee with the university before applying.`);
+  } else if (feeEvidence?.source === "cricos_tuition_total") {
+    cautions.push("Tuition evidence: the annual amount is derived from a CRICOS total tuition amount and course duration, not a verified direct annual fee.");
+  } else if (feeEvidence?.source === "course_record") {
+    cautions.push("Tuition evidence: a fee is present in the course record, but it is not labelled as a verified course-fee override; confirm the current international fee with the university.");
+  } else if (feeEvidence?.source === "unavailable") {
+    cautions.push("Tuition evidence: no tuition amount is currently loaded, so budget fit has reduced influence on this recommendation.");
+  }
+
   const osca = candidate.careerMatch?.oscaOccupation;
   if (osca) {
     reasons.push(`Career goal: ${osca.name} · OSCA ${osca.code} (${osca.sourceRelease ?? "OSCA 2024 Version 1.0"}).`);
@@ -413,6 +435,7 @@ export async function POST(request: NextRequest) {
       regional: candidate.campus.regional,
       annualFee: candidate.course.annualFee,
       totalFee: candidate.course.totalFee,
+      feeEvidence: candidate.feeEvidence ?? null,
       scholarship: candidate.scholarship ?? null,
       careerMatch: candidate.careerMatch ?? null,
       baseScores: candidate.scores,
@@ -425,7 +448,7 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, live course data, OSCA career evidence, and source-backed entry requirements. Qualification-level progression is only a fit signal and must never be treated as proof of admission eligibility. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
+        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, live course data, fee evidence, OSCA career evidence, and source-backed entry requirements. Respect fee-evidence quality: verified direct/source-supported fees are stronger than estimates or derived CRICOS annualisations, and unavailable fees must not be treated as evidence that a course is affordable. Qualification-level progression is only a fit signal and must never be treated as proof of admission eligibility. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
         input: JSON.stringify({ profile, candidates: compactCandidates }),
         text: {
           format: {
