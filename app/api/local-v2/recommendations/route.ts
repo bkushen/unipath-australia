@@ -46,6 +46,7 @@ function tokenOverlapScore(source: string, target: string, minimumMatches: numbe
 }
 
 type CareerDomain = { triggers: string[]; courseTerms: string[] };
+type StrictCareerRule = { occupationTerms: string[]; requiredCourseTerms: string[]; mismatchCap: number };
 type OscaOccupationRow = {
   code: string;
   name: string;
@@ -107,6 +108,32 @@ const careerDomains: CareerDomain[] = [
   { triggers: ["film", "television", "screen producer", "animator"], courseTerms: ["film", "television", "screen", "animation", "media", "creative arts"] },
 ];
 
+const strictCareerRules: StrictCareerRule[] = [
+  { occupationTerms: ["registered nurse", "nurse", "nursing"], requiredCourseTerms: ["nursing", "nurse"], mismatchCap: 35 },
+  { occupationTerms: ["midwife", "midwifery"], requiredCourseTerms: ["midwifery"], mismatchCap: 35 },
+  { occupationTerms: ["physiotherapist", "physiotherapy", "physical therapist"], requiredCourseTerms: ["physiotherapy", "physical therapy"], mismatchCap: 35 },
+  { occupationTerms: ["occupational therapist", "occupational therapy"], requiredCourseTerms: ["occupational therapy"], mismatchCap: 35 },
+  { occupationTerms: ["psychologist", "psychology"], requiredCourseTerms: ["psychology", "psychological"], mismatchCap: 40 },
+  { occupationTerms: ["social worker", "social work"], requiredCourseTerms: ["social work"], mismatchCap: 40 },
+  { occupationTerms: ["pharmacist", "pharmacy"], requiredCourseTerms: ["pharmacy", "pharmaceutical"], mismatchCap: 35 },
+  { occupationTerms: ["dentist", "dental"], requiredCourseTerms: ["dentistry", "dental", "oral health"], mismatchCap: 35 },
+  { occupationTerms: ["medical practitioner", "physician", "surgeon", "doctor"], requiredCourseTerms: ["medicine", "doctor of medicine", "medical degree"], mismatchCap: 35 },
+  { occupationTerms: ["radiographer", "medical imaging", "sonographer"], requiredCourseTerms: ["medical imaging", "radiography", "sonography", "diagnostic imaging"], mismatchCap: 40 },
+  { occupationTerms: ["veterinarian", "veterinary"], requiredCourseTerms: ["veterinary"], mismatchCap: 35 },
+  { occupationTerms: ["lawyer", "solicitor", "barrister", "legal practitioner"], requiredCourseTerms: ["law", "legal", "juris doctor"], mismatchCap: 40 },
+  { occupationTerms: ["teacher", "secondary school teacher", "primary school teacher", "early childhood teacher"], requiredCourseTerms: ["teaching", "education", "teacher"], mismatchCap: 45 },
+];
+
+function strictCareerGuard(occupation: string, score: number, ...courseValues: Array<string | null | undefined>) {
+  const occupationText = occupation.toLowerCase();
+  const courseText = courseValues.filter(Boolean).join(" ").toLowerCase();
+  const rule = strictCareerRules.find((item) => item.occupationTerms.some((term) => occupationText.includes(term)));
+  if (!rule) return { score, mismatch: false, ruleApplied: false };
+  const hasProfessionSpecificCourseTerm = rule.requiredCourseTerms.some((term) => courseText.includes(term));
+  if (hasProfessionSpecificCourseTerm) return { score, mismatch: false, ruleApplied: true };
+  return { score: Math.min(score, rule.mismatchCap), mismatch: true, ruleApplied: true };
+}
+
 function inferredCareerScore(occupation: string, oscaOccupation: OscaOccupationRow | null, ...courseValues: Array<string | null | undefined>) {
   if (!occupation.trim()) return 70;
   const direct = textScore(occupation, ...courseValues);
@@ -131,7 +158,9 @@ function inferredCareerScore(occupation: string, oscaOccupation: OscaOccupationR
       ...(oscaOccupation.alternative_titles ?? []),
       ...(oscaOccupation.specialisations ?? []),
     ].join(" ");
-    const titleScore = tokenOverlapScore(titleEvidence, courseText, 1, 67, 7, 92);
+    const titleTokens = meaningfulCareerTokens(titleEvidence);
+    const titleMinimumMatches = titleTokens.length >= 2 ? 2 : 1;
+    const titleScore = tokenOverlapScore(titleEvidence, courseText, titleMinimumMatches, 67, 7, 92);
     const descriptionScore = oscaOccupation.description
       ? tokenOverlapScore(oscaOccupation.description, courseText, 2, 58, 4, 82)
       : 0;
@@ -316,7 +345,9 @@ export async function GET(request: NextRequest) {
       .map((course) => {
         const studyField = course.study_field_id ? fieldMap.get(course.study_field_id) ?? null : null;
         const academic = textScore(study || field, studyField, course.name, course.qualification_level);
-        const career = inferredCareerScore(occupation, oscaOccupation, course.name, studyField, course.qualification_level);
+        const inferredCareer = inferredCareerScore(occupation, oscaOccupation, course.name, studyField, course.qualification_level);
+        const careerGuard = strictCareerGuard(occupation, inferredCareer, course.name, studyField, course.qualification_level);
+        const career = careerGuard.score;
         const fee = resolveCourseFees(course, latestInternationalFeeByCourse.get(course.id));
         if (fee.source === "verified_course_fee") feeCoverage.verifiedCourseFee += 1;
         else if (fee.source === "estimated_course_fee") feeCoverage.estimatedCourseFee += 1;
@@ -327,7 +358,7 @@ export async function GET(request: NextRequest) {
         const studyPreference = textScore(study, course.name, studyField);
         const feeConfidenceAdjustment = fee.source === "unavailable" ? -3 : fee.source === "cricos_tuition_total" ? -1 : fee.source === "estimated_course_fee" ? 0 : 2;
         const preliminaryScore = clamp(academic * 0.32 + career * 0.38 + affordability * 0.20 + studyPreference * 0.10 + feeConfidenceAdjustment);
-        return { course, studyField, academic, career, affordability, preliminaryScore, fee };
+        return { course, studyField, academic, career, careerGuard, affordability, preliminaryScore, fee };
       })
       .sort((a, b) => b.preliminaryScore - a.preliminaryScore)
       .slice(0, ENRICHMENT_SHORTLIST_SIZE);
@@ -401,8 +432,13 @@ export async function GET(request: NextRequest) {
       const occupationNames = linkedOccupationRows.map((item) => occupationMap.get(item.id)).filter(Boolean) as string[];
       const explicitCareerScores = occupationNames.map((name) => textScore(occupation, name));
       const bestExplicitCareerScore = explicitCareerScores.length ? Math.max(...explicitCareerScores) : null;
-      const career = bestExplicitCareerScore == null ? base.career : Math.max(base.career, bestExplicitCareerScore);
-      const careerMatchSource = bestExplicitCareerScore != null && bestExplicitCareerScore >= base.career
+      const strongExplicitCareerMatch = bestExplicitCareerScore != null && bestExplicitCareerScore >= 80;
+      const rawCareer = bestExplicitCareerScore == null ? base.career : Math.max(base.career, bestExplicitCareerScore);
+      const finalCareerGuard = strongExplicitCareerMatch
+        ? { score: rawCareer, mismatch: false, ruleApplied: base.careerGuard.ruleApplied }
+        : strictCareerGuard(occupation, rawCareer, course.name, base.studyField, course.qualification_level);
+      const career = finalCareerGuard.score;
+      const careerMatchSource = strongExplicitCareerMatch
         ? "explicit_mapping"
         : oscaOccupation
           ? "osca_metadata_inference"
@@ -475,6 +511,7 @@ export async function GET(request: NextRequest) {
         scores: { academic: base.academic, career, affordability: base.affordability, location: bestCampus.score, migration, overall },
         reasons: [
           base.academic >= 80 ? "Strong study-field match." : null,
+          finalCareerGuard.mismatch ? "Profession-specific career guardrail applied: this course does not contain the study terms UniPath requires for this career goal, so career relevance was capped unless a strong explicit course-to-career mapping exists." : null,
           career >= 80 && careerMatchSource === "explicit_mapping" ? "Strong career match from an explicit course-to-career mapping." : null,
           career >= 80 && careerMatchSource === "osca_metadata_inference" ? "Strong career relevance inferred by UniPath from the selected ABS OSCA occupation name, description, alternative titles and specialisations compared with the course name and study field." : null,
           career >= 80 && careerMatchSource === "inferred_text" ? "Strong career relevance inferred from the course name and study field." : null,
@@ -531,7 +568,7 @@ export async function GET(request: NextRequest) {
         },
         note: "OSCA identifies and describes the occupation. Course relevance is a UniPath inference unless an explicit course-to-career mapping is loaded.",
       } : null,
-      careerMatching: oscaOccupation ? "enriched_osca_metadata_inference_plus_explicit_mappings" : "expanded_multidomain_inference_plus_explicit_mappings",
+      careerMatching: oscaOccupation ? "profession_guardrails_plus_enriched_osca_metadata_plus_explicit_mappings" : "profession_guardrails_plus_multidomain_inference_plus_explicit_mappings",
       feeCoverage,
       feeMethod: "verified_course_fee_then_estimated_course_fee_then_course_record_then_cricos_tuition_total",
       diversity: {
