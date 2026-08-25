@@ -10,7 +10,7 @@
     "course-links": "node scripts/fetch-official-course-links.mjs",
     "course-links:rmit": "node scripts/import-rmit-course-catalogue.mjs",
     "course-links:rmit:verify": "node scripts/verify-rmit-course-links.mjs",
-    "course-links:monash": "node scripts/import-monash-handbook-catalogue.mjs"
+    "course-links:monash": "node scripts/import-monash-handbook-browser.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
