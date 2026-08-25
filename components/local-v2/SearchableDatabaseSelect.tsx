@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 export type SearchOption = {
   id: string;
@@ -29,18 +29,27 @@ export function SearchableDatabaseSelect({
   onChange: (value: string) => void;
   onSelect?: (option: SearchOption) => void;
 }) {
+  const reactId = useId().replace(/:/g, "");
+  const inputId = `unipath-${type}-${reactId}`;
+  const listboxId = `${inputId}-options`;
+  const helperId = helper ? `${inputId}-help` : undefined;
+  const errorId = `${inputId}-error`;
   const [query, setQuery] = useState(value);
   const [options, setOptions] = useState<SearchOption[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [retryKey, setRetryKey] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
-  const listboxId = `unipath-${type}-options`;
 
   useEffect(() => {
     setQuery(value);
   }, [value]);
+
+  useEffect(() => {
+    if (!open) setActiveIndex(-1);
+  }, [open]);
 
   useEffect(() => {
     const onDocumentClick = (event: MouseEvent) => {
@@ -81,10 +90,12 @@ export function SearchableDatabaseSelect({
         const data = (await response.json()) as { options?: SearchOption[]; error?: string; detail?: string };
         if (!response.ok) throw new Error(data.detail || data.error || "The database search could not be completed.");
         setOptions(data.options ?? []);
+        setActiveIndex(-1);
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           setError((err as Error).message || "The database search could not be completed.");
           setOptions([]);
+          setActiveIndex(-1);
         }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
@@ -103,6 +114,7 @@ export function SearchableDatabaseSelect({
     onSelect?.(option);
     setOpen(false);
     setError("");
+    setActiveIndex(-1);
   };
 
   const retry = () => {
@@ -112,19 +124,49 @@ export function SearchableDatabaseSelect({
     setRetryKey((current) => current + 1);
   };
 
+  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      setOpen(false);
+      setActiveIndex(-1);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      if (options.length) setActiveIndex((current) => Math.min(options.length - 1, current + 1));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setOpen(true);
+      if (options.length) setActiveIndex((current) => current <= 0 ? options.length - 1 : current - 1);
+      return;
+    }
+    if (event.key === "Enter" && open && activeIndex >= 0 && options[activeIndex]) {
+      event.preventDefault();
+      choose(options[activeIndex]);
+    }
+  };
+
+  const describedBy = [helperId, error ? errorId : undefined].filter(Boolean).join(" ") || undefined;
+  const activeDescendant = open && activeIndex >= 0 && options[activeIndex] ? `${inputId}-option-${activeIndex}` : undefined;
+
   return (
     <div ref={rootRef} style={{ display: "grid", gap: 7, position: "relative" }}>
-      <label style={{ fontWeight: 700 }}>{label}</label>
+      <label htmlFor={inputId} style={{ fontWeight: 700 }}>{label}</label>
       <div style={{ position: "relative" }}>
         <input
+          id={inputId}
           value={query}
           onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
           onChange={(event) => {
             const next = event.target.value;
             setQuery(next);
             onChange(next);
             setError("");
             setOpen(true);
+            setActiveIndex(-1);
           }}
           placeholder={placeholder}
           autoComplete="off"
@@ -132,16 +174,18 @@ export function SearchableDatabaseSelect({
           aria-expanded={open}
           aria-controls={open ? listboxId : undefined}
           aria-autocomplete="list"
+          aria-activedescendant={activeDescendant}
+          aria-describedby={describedBy}
           aria-invalid={Boolean(error)}
           style={inputStyle}
         />
-        <span style={searchIconStyle}>⌕</span>
+        <span aria-hidden="true" style={searchIconStyle}>⌕</span>
       </div>
 
-      {helper && <div style={helperStyle}>{helper}</div>}
+      {helper && <div id={helperId} style={helperStyle}>{helper}</div>}
 
       {open && (
-        <div id={listboxId} role="listbox" aria-busy={loading} style={menuStyle}>
+        <div id={listboxId} role="listbox" aria-label={`${label} suggestions`} aria-busy={loading} style={menuStyle}>
           <div style={menuHeaderStyle}>
             <span>{loading ? "Searching UniPath database…" : type === "qualification" ? "Prior qualifications from UniPath database" : "Suggestions from UniPath database"}</span>
             <span style={sourceBadgeStyle}>DB</span>
@@ -150,7 +194,7 @@ export function SearchableDatabaseSelect({
           {loading && <div style={loadingStyle} role="status" aria-live="polite">Loading database options…</div>}
 
           {!loading && error && (
-            <div style={errorStyle} role="alert">
+            <div id={errorId} style={errorStyle} role="alert">
               <strong>Unable to load database options.</strong>
               <span style={stateCopyStyle}>{error}</span>
               <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={retry} style={retryButtonStyle}>Retry</button>
@@ -164,8 +208,18 @@ export function SearchableDatabaseSelect({
             </div>
           )}
 
-          {!loading && !error && options.map((option) => (
-            <button key={option.id} type="button" role="option" aria-selected={option.value === value} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)} style={optionStyle}>
+          {!loading && !error && options.map((option, index) => (
+            <button
+              id={`${inputId}-option-${index}`}
+              key={option.id}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              onMouseEnter={() => setActiveIndex(index)}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => choose(option)}
+              style={{ ...optionStyle, ...(activeIndex === index ? activeOptionStyle : {}) }}
+            >
               <span style={{ fontWeight: 750 }}>{option.label}</span>
               {option.secondary && <span style={secondaryStyle}>{option.secondary}</span>}
             </button>
@@ -191,6 +245,7 @@ const menuStyle = { position: "absolute", zIndex: 40, top: "100%", left: 0, righ
 const menuHeaderStyle = { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid #eaecf0", color: "#667085", fontSize: 11, fontWeight: 700 } as const;
 const sourceBadgeStyle = { background: "#eaf3ff", color: "#0057b8", borderRadius: 999, padding: "2px 6px", fontSize: 10 } as const;
 const optionStyle = { width: "100%", border: 0, borderBottom: "1px solid #f0f2f5", background: "#fff", textAlign: "left", padding: "11px 12px", cursor: "pointer", display: "grid", gap: 2, color: "#101828" } as const;
+const activeOptionStyle = { background: "#eef4ff" } as const;
 const secondaryStyle = { color: "#667085", fontSize: 12 } as const;
 const stateCopyStyle = { display: "block", marginTop: 4, lineHeight: 1.45 } as const;
 const loadingStyle = { padding: 14, color: "#475467", background: "#f8fafc", fontSize: 13 } as const;
