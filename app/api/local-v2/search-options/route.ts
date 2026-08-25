@@ -20,6 +20,24 @@ type SupabaseErrorShape = {
 
 const validTypes = new Set<SearchType>(["qualification", "study_field", "occupation", "course", "location"]);
 
+const priorQualificationOptions = [
+  { value: "Secondary school below Year 12 equivalent", secondary: "Prior schooling / senior-secondary pathway" },
+  { value: "Secondary school / Year 12 equivalent", secondary: "Completed senior-secondary qualification or international equivalent" },
+  { value: "Foundation Studies", secondary: "University or tertiary foundation/pathway program" },
+  { value: "Certificate III", secondary: "Australian AQF-style vocational level or comparable qualification" },
+  { value: "Certificate IV", secondary: "Australian AQF-style vocational level or comparable qualification" },
+  { value: "Diploma", secondary: "Diploma-level tertiary or vocational qualification" },
+  { value: "Advanced Diploma", secondary: "Advanced diploma-level tertiary or vocational qualification" },
+  { value: "Associate Degree", secondary: "Associate degree-level higher education qualification" },
+  { value: "Bachelor Degree", secondary: "Bachelor-level higher education qualification" },
+  { value: "Bachelor Honours Degree", secondary: "Bachelor honours-level higher education qualification" },
+  { value: "Graduate Certificate", secondary: "Postgraduate certificate-level qualification" },
+  { value: "Graduate Diploma", secondary: "Postgraduate diploma-level qualification" },
+  { value: "Masters Degree", secondary: "Master's-level higher education qualification" },
+  { value: "Doctoral Degree", secondary: "Doctoral-level higher education qualification" },
+  { value: "Other / international qualification", secondary: "Use when the closest level above is unclear; UniPath will avoid guessing equivalency" },
+];
+
 const broadStudyAreas = [
   "Natural and Physical Sciences",
   "Information Technology",
@@ -83,6 +101,18 @@ export async function GET(request: NextRequest) {
     let source = "SUPABASE";
 
     if (type === "qualification") {
+      source = "UNIPATH_PRIOR_QUALIFICATION_LEVELS_PLUS_COURSE_CATALOGUE";
+      const seen = new Set<string>();
+      for (const option of priorQualificationOptions.filter((item) => matches(item.value, q))) {
+        seen.add(option.value.toLowerCase());
+        options.push({
+          id: `prior-qualification:${option.value}`,
+          label: option.value,
+          value: option.value,
+          secondary: option.secondary,
+        });
+      }
+
       const values = new Set<string>();
       for (let from = 0; ; from += 1000) {
         let query = supabase
@@ -96,12 +126,16 @@ export async function GET(request: NextRequest) {
         for (const row of data ?? []) if (row.qualification_level) values.add(row.qualification_level);
         if (!data || data.length < 1000) break;
       }
-      options = [...values].sort().map((value) => ({
-        id: `qualification:${value}`,
-        label: value,
-        value,
-        secondary: "Qualification level in the UniPath course catalogue",
-      }));
+      for (const value of [...values].sort()) {
+        if (seen.has(value.toLowerCase())) continue;
+        seen.add(value.toLowerCase());
+        options.push({
+          id: `qualification:${value}`,
+          label: value,
+          value,
+          secondary: "Qualification level also present in the UniPath Australian course catalogue",
+        });
+      }
     }
 
     if (type === "study_field") {
