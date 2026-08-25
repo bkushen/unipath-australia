@@ -42,7 +42,7 @@ type LiveRecommendation = {
   campus: { id: string; name: string; city: string | null; state: string | null; postcode: string | null; regional: boolean; regional_verified: boolean | null; regional_classification: string | null };
   scholarship: { id: string; name: string; percentage: number | null; amount: number | null } | null;
   scholarshipAssessment?: ScholarshipAssessment;
-  livingCost: { weeklyLow: number; weeklyHigh: number; monthlyEstimate: number; status: string | null } | null;
+  livingCost: { weeklyLow: number; weeklyHigh: number; monthlyEstimate: number; sourceUrl: string | null; verifiedAt: string | null; status: string | null } | null;
   locationAssessment?: LocationAssessment;
   scores: { academic: number; career: number; affordability: number; location: number; migration: number; overall: number };
   ai?: AIScore;
@@ -109,7 +109,14 @@ export default function QuickMatchPageClient() {
     const location = assessLocation({
       preferredLocation: profile.preferredLocation, preferredStates: profile.preferredStates, regionalAccepted: profile.regionalAccepted,
       campus: { name: item.campus.name, city: item.campus.city, state: item.campus.state, regional: item.campus.regional, regionalVerified: item.campus.regional_verified, regionalClassification: item.campus.regional_classification },
-      livingCost: item.livingCost ? { weeklyLow: item.livingCost.weeklyLow, weeklyHigh: item.livingCost.weeklyHigh, monthlyEstimate: item.livingCost.monthlyEstimate, verificationStatus: item.livingCost.status } : null,
+      livingCost: item.livingCost ? {
+        weeklyLow: item.livingCost.weeklyLow,
+        weeklyHigh: item.livingCost.weeklyHigh,
+        monthlyEstimate: item.livingCost.monthlyEstimate,
+        sourceUrl: item.livingCost.sourceUrl,
+        verifiedAt: item.livingCost.verifiedAt,
+        verificationStatus: item.livingCost.status,
+      } : null,
     });
     const afterScholarship = item.scores.overall - oldScholarship + scholarship.adjustment;
     const overall = clamp(afterScholarship + (location.score - item.scores.location) * .20);
@@ -164,7 +171,7 @@ export default function QuickMatchPageClient() {
 
     {stage === "input" && <section style={panel}>
       {editing && results.length > 0 && <div style={info}><strong>Editing saved answers.</strong> Your current results stay available until you recalculate. <button onClick={() => { setEditing(false); setStage("result"); }} style={smallButton}>Cancel editing</button></div>}
-      <div style={{ fontWeight: 800 }}>Step {step} of 4</div><div style={track}><div style={{ ...fill, width: `${step * 25}%` }} /></div>
+      <div style={{ fontWeight: 800 }}>Step {step} of 4</div><div role="progressbar" aria-valuemin={1} aria-valuemax={4} aria-valuenow={step} aria-label={`Quick Match step ${step} of 4`} style={track}><div style={{ ...fill, width: `${step * 25}%` }} /></div>
       {step === 1 && <div style={section}><h2>Background & career goal</h2><div style={grid}><label style={label}>Age<input style={input} type="number" min={15} max={100} value={profile.age ?? ""} onChange={(e) => setProfile((c) => ({ ...c, age: e.target.value ? Number(e.target.value) : undefined }))} /></label><SearchableDatabaseSelect label="Highest qualification" type="qualification" value={profile.highestQualification} onChange={(highestQualification) => setProfile((c) => ({ ...c, highestQualification }))} /><SearchableDatabaseSelect label="Previous study field" type="study_field" value={profile.qualificationField} onChange={(qualificationField) => setProfile((c) => ({ ...c, qualificationField }))} /><SearchableDatabaseSelect label="Career goal" type="occupation" value={profile.desiredOccupation} onChange={(desiredOccupation) => setProfile((c) => ({ ...c, desiredOccupation }))} /></div></div>}
       {step === 2 && <div style={section}><h2>Budget</h2><div style={grid}><CurrencyBudgetInput label="Budget for one semester" audCents={profile.semesterTuitionBudgetCents ?? 0} onAudCentsChange={(v) => setProfile((c) => ({ ...c, semesterTuitionBudgetCents: v, annualTuitionBudgetCents: v * 2 }))} /><CurrencyBudgetInput label="Maximum full course budget" audCents={profile.fullCourseBudgetCents ?? 0} onAudCentsChange={(v) => setProfile((c) => ({ ...c, fullCourseBudgetCents: v }))} /></div></div>}
       {step === 3 && <div style={section}><h2>Location</h2><SearchableDatabaseSelect label="Preferred location" type="location" value={profile.preferredLocation ?? ""} onChange={(preferredLocation) => setProfile((c) => ({ ...c, preferredLocation }))} onSelect={selectLocation} /><div style={pills}>{states.map((s) => <button key={s} onClick={() => updateState(s)} style={{ ...pill, ...(profile.preferredStates.includes(s) ? selected : {}) }}>{s}</button>)}</div><div style={pills}><button onClick={() => setProfile((c) => ({ ...c, regionalAccepted: true }))} style={{ ...pill, ...(profile.regionalAccepted ? selected : {}) }}>Regional OK</button><button onClick={() => setProfile((c) => ({ ...c, regionalAccepted: false }))} style={{ ...pill, ...(!profile.regionalAccepted ? selected : {}) }}>No regional</button></div></div>}
