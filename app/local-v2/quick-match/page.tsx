@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { BudgetAssessmentPanel } from "@/components/local-v2/BudgetAssessmentPanel";
 import { CurrencyBudgetInput } from "@/components/local-v2/CurrencyBudgetInput";
 import { SearchableDatabaseSelect, type SearchOption } from "@/components/local-v2/SearchableDatabaseSelect";
+import { assessDetailedProfile, type DetailedAssessment } from "@/lib/local-v2/detailed-assessment";
 import { clearLocalV2Profile, loadLocalV2Profile, saveLocalV2Profile } from "@/lib/local-v2/profile-storage";
 import type { AustralianState, EnglishTestType, MigrationImportance, ScholarshipImportance, StudentDecisionProfile } from "@/lib/local-v2/types";
 
@@ -42,7 +43,7 @@ type QuickStep = 1 | 2 | 3 | 4;
 type EntryRequirement = { course_id: string; academic_text: string | null; minimum_gpa: number | string | null; relevant_field_required: boolean | null; ielts_overall: number | string | null; pte_overall: number | string | null; source_url: string | null; verified_at: string | null };
 type EntryEvidence = { level: "source_backed" | "partial" | "loaded_unverified" | "not_loaded"; label: string; sourceBacked: boolean; checkedFields: number; note: string };
 type ScoreBreakdown = { baseCourseFit: number; qualificationReadiness: number; academicEvidence: number; englishEvidence: number; fieldEvidence: number; eligibilityEvidence: number };
-type AIScore = { courseId: string; aiScore: number; eligibilityStatus: "likely_meets" | "needs_review" | "requirements_not_verified"; confidence?: "high" | "medium" | "low"; entryEvidence?: EntryEvidence; scoreBreakdown?: ScoreBreakdown; reasons: string[]; cautions: string[]; entryRequirement: EntryRequirement | null };
+type AIScore = { courseId: string; aiScore: number; eligibilityStatus: "likely_meets" | "needs_review" | "requirements_not_verified"; confidence?: "high" | "medium" | "low"; entryEvidence?: EntryEvidence; detailedAssessment?: DetailedAssessment; scoreBreakdown?: ScoreBreakdown; reasons: string[]; cautions: string[]; entryRequirement: EntryRequirement | null };
 type FeeEvidence = {
   source: "verified_course_fee" | "estimated_course_fee" | "course_record" | "cricos_tuition_total" | "unavailable" | string;
   feeYear: number | null;
@@ -114,18 +115,13 @@ export default function QuickMatchPage() {
       if (full <= 0) return "Enter your maximum full course budget.";
       if (full < semester) return "Your full course budget should be at least as much as one semester budget.";
     }
-    if (currentStep === 3 && !profile.preferredLocation?.trim() && profile.preferredStates.length === 0) {
-      return "Choose a preferred location or at least one state.";
-    }
+    if (currentStep === 3 && !profile.preferredLocation?.trim() && profile.preferredStates.length === 0) return "Choose a preferred location or at least one state.";
     return "";
   };
 
   const goNext = () => {
     const problem = validateStep(step);
-    if (problem) {
-      setValidationError(problem);
-      return;
-    }
+    if (problem) { setValidationError(problem); return; }
     setValidationError("");
     setStep((step + 1) as QuickStep);
   };
@@ -135,7 +131,7 @@ export default function QuickMatchPage() {
     setStep(Math.max(1, step - 1) as QuickStep);
   };
 
-  const enrichWithAI = async (base: LiveRecommendation[], migrationImportance: MigrationImportance) => {
+  const enrichWithAI = async (base: LiveRecommendation[], migrationImportance: MigrationImportance, detailedMode = false) => {
     if (!base.length) return base;
     const response = await fetch("/api/local-v2/ai-score", {
       method: "POST",
@@ -164,181 +160,81 @@ export default function QuickMatchPage() {
     const data = await response.json() as { results?: AIScore[]; mode?: string; message?: string; error?: string; detail?: string };
     if (!response.ok) throw new Error(data.detail || data.error || "Unable to calculate match scores.");
     setAiMode(data.mode ?? "");
-    setAiMessage(data.message ?? "");
+    setAiMessage(detailedMode ? `${data.message ?? ""} Detailed profile adjustments use funds, relevant experience, entered skills and dependant planning pressure.`.trim() : data.message ?? "");
     const aiMap = new Map((data.results ?? []).map((item) => [item.courseId, item]));
-    return base.map((item) => ({ ...item, ai: aiMap.get(item.course.id) })).sort((a, b) => (b.ai?.aiScore ?? b.scores.overall) - (a.ai?.aiScore ?? a.scores.overall));
+    return base.map((item) => {
+      const ai = aiMap.get(item.course.id);
+      if (!detailedMode || !ai) return { ...item, ai };
+      const detailedAssessment = assessDetailedProfile({
+        baseScore: ai.aiScore,
+        careerScore: item.scores.career,
+        totalFunds: (profile.totalFundsCents ?? 0) / 100,
+        totalFee: item.course.totalFee,
+        annualFee: item.course.annualFee,
+        dependants: profile.dependants ?? 0,
+        yearsExperience: profile.yearsExperience ?? 0,
+        skills: profile.skills ?? [],
+        courseName: item.course.name,
+        studyField: item.course.studyField,
+        occupationName: profile.desiredOccupation,
+      });
+      return { ...item, ai: { ...ai, aiScore: detailedAssessment.adjustedScore, detailedAssessment } };
+    }).sort((a, b) => (b.ai?.aiScore ?? b.scores.overall) - (a.ai?.aiScore ?? a.scores.overall));
   };
 
-  const loadRecommendations = async (migrationImportance: MigrationImportance, target: "standard" | "migration") => {
-    setLoading(true);
-    setError("");
-    setAiMode("");
-    setAiMessage("");
+  const loadRecommendations = async (migrationImportance: MigrationImportance, target: "standard" | "migration", detailedMode = false) => {
+    setLoading(true); setError(""); setAiMode(""); setAiMessage("");
     try {
-      const params = new URLSearchParams({
-        study: profile.preferredStudy ?? "",
-        field: profile.qualificationField,
-        occupation: profile.desiredOccupation,
-        location: profile.preferredLocation ?? "",
-        states: profile.preferredStates.join(","),
-        regionalAccepted: String(profile.regionalAccepted),
-        migrationImportance,
-        scholarshipImportance: profile.scholarshipImportance ?? "none",
-        semesterBudget: String((profile.semesterTuitionBudgetCents ?? 0) / 100),
-        fullBudget: String((profile.fullCourseBudgetCents ?? 0) / 100),
-      });
+      const params = new URLSearchParams({ study: profile.preferredStudy ?? "", field: profile.qualificationField, occupation: profile.desiredOccupation, location: profile.preferredLocation ?? "", states: profile.preferredStates.join(","), regionalAccepted: String(profile.regionalAccepted), migrationImportance, scholarshipImportance: profile.scholarshipImportance ?? "none", semesterBudget: String((profile.semesterTuitionBudgetCents ?? 0) / 100), fullBudget: String((profile.fullCourseBudgetCents ?? 0) / 100) });
       const response = await fetch(`/api/local-v2/recommendations?${params.toString()}`);
       const data = await response.json() as { recommendations?: LiveRecommendation[]; detail?: string; error?: string };
       if (!response.ok) throw new Error(data.detail || data.error || "Unable to load recommendations.");
-      const scored = await enrichWithAI(data.recommendations ?? [], migrationImportance);
-      if (target === "standard") setResults(scored);
-      else setMigrationResults(scored);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
+      const scored = await enrichWithAI(data.recommendations ?? [], migrationImportance, detailedMode);
+      if (target === "standard") setResults(scored); else setMigrationResults(scored);
+    } catch (err) { setError((err as Error).message); } finally { setLoading(false); }
   };
 
-  const showQuickResult = async () => {
-    setValidationError("");
-    setStage("result");
-    await loadRecommendations("none", "standard");
-  };
-  const showDetailedResult = async () => { setStage("detailed-result"); await loadRecommendations("none", "standard"); };
-  const showMigrationResult = async () => { setStage("migration-result"); await loadRecommendations(migrationChoice, "migration"); };
+  const showQuickResult = async () => { setValidationError(""); setStage("result"); await loadRecommendations("none", "standard", false); };
+  const showDetailedResult = async () => { setStage("detailed-result"); await loadRecommendations("none", "standard", true); };
+  const showMigrationResult = async () => { setStage("migration-result"); await loadRecommendations(migrationChoice, "migration", false); };
   const reset = () => { clearLocalV2Profile(); setProfile(initialProfile); setStage("input"); setStep(1); setResults([]); setMigrationResults([]); setError(""); setValidationError(""); };
 
   const semesterBudget = (profile.semesterTuitionBudgetCents ?? 0) / 100;
   const fullCourseBudget = (profile.fullCourseBudgetCents ?? 0) / 100;
 
   return <main style={pageStyle}>
-    <header style={{ marginBottom: 24 }}>
-      <div style={topRowStyle}><span style={badgeStyle}>Quick Match · smart scoring + live database</span><button type="button" onClick={reset} style={ghostButtonStyle}>Clear saved answers</button></div>
-      <h1 style={{ margin: "16px 0 8px", fontSize: 42, color: "#fff" }}>What should I study in Australia?</h1>
-      <p style={heroCopyStyle}>Start with your age, education, career goal, budget and location. Add extra details only if you want a more precise match.</p>
-    </header>
+    <header style={{ marginBottom: 24 }}><div style={topRowStyle}><span style={badgeStyle}>Quick Match · smart scoring + live database</span><button type="button" onClick={reset} style={ghostButtonStyle}>Clear saved answers</button></div><h1 style={{ margin: "16px 0 8px", fontSize: 42, color: "#fff" }}>What should I study in Australia?</h1><p style={heroCopyStyle}>Start with your age, education, career goal, budget and location. Add extra details only if you want a more precise match.</p></header>
 
-    {stage === "input" && <section style={shellStyle}>
-      <div style={progressTextStyle}>Step {step} of 4</div><div style={progressTrackStyle}><div style={{ ...progressFillStyle, width: `${step * 25}%` }} /></div>
+    {stage === "input" && <section style={shellStyle}><div style={progressTextStyle}>Step {step} of 4</div><div style={progressTrackStyle}><div style={{ ...progressFillStyle, width: `${step * 25}%` }} /></div>
+      {step === 1 && <div style={panelStyle}><h2>Your background & career goal</h2><p style={mutedStyle}>Enter your age first, then your education and the career you want to work toward.</p><div style={gridStyle}><label style={labelStyle}>Age<input type="number" min={15} max={100} step={1} value={profile.age ?? ""} onChange={(e) => setProfile((c) => ({ ...c, age: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} placeholder="e.g. 24" /></label><SearchableDatabaseSelect label="Highest qualification" type="qualification" value={profile.highestQualification} placeholder="Search qualification" onChange={(highestQualification) => setProfile((c) => ({ ...c, highestQualification }))} /><SearchableDatabaseSelect label="Previous study field" type="study_field" value={profile.qualificationField} placeholder="e.g. Information Technology" onChange={(qualificationField) => setProfile((c) => ({ ...c, qualificationField }))} /><SearchableDatabaseSelect label="Career goal" type="occupation" value={profile.desiredOccupation} placeholder="e.g. Software Engineer" onChange={(desiredOccupation) => setProfile((c) => ({ ...c, desiredOccupation }))} /></div></div>}
+      {step === 2 && <div style={panelStyle}><h2>Your budget</h2><p style={mutedStyle}>Tell UniPath what tuition range is realistic for you.</p><div style={gridStyle}><CurrencyBudgetInput label="Budget for one semester" audCents={profile.semesterTuitionBudgetCents ?? 0} onAudCentsChange={(semesterTuitionBudgetCents) => setProfile((c) => ({ ...c, semesterTuitionBudgetCents, annualTuitionBudgetCents: semesterTuitionBudgetCents * 2 }))} /><CurrencyBudgetInput label="Maximum full course budget" audCents={profile.fullCourseBudgetCents ?? 0} onAudCentsChange={(fullCourseBudgetCents) => setProfile((c) => ({ ...c, fullCourseBudgetCents }))} /></div></div>}
+      {step === 3 && <div style={panelStyle}><h2>Your location</h2><p style={mutedStyle}>Choose a city or select one or more states if you are flexible.</p><SearchableDatabaseSelect label="Preferred location" type="location" value={profile.preferredLocation ?? ""} placeholder="e.g. Melbourne, Ballarat, Sydney" onChange={(preferredLocation) => setProfile((c) => ({ ...c, preferredLocation }))} onSelect={selectLocation} /><div style={{ marginTop: 20 }}><strong>Preferred state(s)</strong><div style={pillRowStyle}>{states.map((state) => <button key={state} type="button" onClick={() => updateState(state)} style={{ ...pillStyle, ...(profile.preferredStates.includes(state) ? selectedPillStyle : {}) }}>{state}</button>)}</div></div><div style={{ marginTop: 20 }}><strong>Open to regional Australia?</strong><div style={pillRowStyle}><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: true }))} style={{ ...pillStyle, ...(profile.regionalAccepted ? selectedPillStyle : {}) }}>Yes</button><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: false }))} style={{ ...pillStyle, ...(!profile.regionalAccepted ? selectedPillStyle : {}) }}>No</button></div></div></div>}
+      {step === 4 && <div style={panelStyle}><h2>Optional details</h2><p style={mutedStyle}>Skip anything you do not know. These details only refine the match and entry-requirement checks.</p><div style={gridStyle}><SearchableDatabaseSelect label="Preferred study area (optional)" type="course" value={profile.preferredStudy ?? ""} placeholder="e.g. Cyber Security" helper="Leave blank if you want UniPath to infer study areas from your career goal." onChange={(preferredStudy) => setProfile((c) => ({ ...c, preferredStudy }))} /><label style={labelStyle}>English test <span style={optionalLabelStyle}>Optional</span><select value={profile.englishTestType ?? "none"} onChange={(e) => setProfile((c) => ({ ...c, englishTestType: e.target.value as EnglishTestType, englishScore: e.target.value === "none" ? undefined : c.englishScore }))} style={inputStyle}><option value="none">Not taken / skip</option><option value="ielts">IELTS</option><option value="pte">PTE Academic</option></select></label>{(profile.englishTestType ?? "none") !== "none" && <label style={labelStyle}>{profile.englishTestType === "pte" ? "PTE overall score" : "IELTS overall score"}<input type="number" min={0} max={profile.englishTestType === "pte" ? 90 : 9} step={profile.englishTestType === "pte" ? 1 : 0.5} value={profile.englishScore ?? ""} onChange={(e) => setProfile((c) => ({ ...c, englishScore: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} /></label>}</div><div style={{ marginTop: 20 }}><strong>Scholarship preference <span style={optionalLabelStyle}>Optional</span></strong><div style={pillRowStyle}>{([["high","Very important"],["prefer","Prefer if available"],["none","No preference"]] as [ScholarshipImportance,string][]).map(([value,label]) => <button key={value} type="button" onClick={() => setProfile((c) => ({ ...c, scholarshipImportance: value }))} style={{ ...pillStyle, ...((profile.scholarshipImportance ?? "none") === value ? selectedPillStyle : {}) }}>{label}</button>)}</div></div></div>}
+      {validationError && <div style={errorStyle}>{validationError}</div>}<div style={footerStyle}><button type="button" disabled={step === 1} onClick={goBack} style={secondaryButtonStyle}>← Back</button>{step < 4 ? <button type="button" onClick={goNext} style={primaryButtonStyle}>Continue →</button> : <button type="button" onClick={showQuickResult} style={primaryButtonStyle}>Get Match Score →</button>}</div></section>}
 
-      {step === 1 && <div style={panelStyle}>
-        <h2>Your background & career goal</h2>
-        <p style={mutedStyle}>Enter your age first, then your education and the career you want to work toward.</p>
-        <div style={gridStyle}>
-          <label style={labelStyle}>Age<input type="number" min={15} max={100} step={1} value={profile.age ?? ""} onChange={(e) => setProfile((c) => ({ ...c, age: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} placeholder="e.g. 24" /></label>
-          <SearchableDatabaseSelect label="Highest qualification" type="qualification" value={profile.highestQualification} placeholder="Search qualification" onChange={(highestQualification) => setProfile((c) => ({ ...c, highestQualification }))} />
-          <SearchableDatabaseSelect label="Previous study field" type="study_field" value={profile.qualificationField} placeholder="e.g. Information Technology" onChange={(qualificationField) => setProfile((c) => ({ ...c, qualificationField }))} />
-          <SearchableDatabaseSelect label="Career goal" type="occupation" value={profile.desiredOccupation} placeholder="e.g. Software Engineer" onChange={(desiredOccupation) => setProfile((c) => ({ ...c, desiredOccupation }))} />
-        </div>
-      </div>}
+    {(stage === "result" || stage === "detailed-result") && <><section style={sectionStyle}>{loading ? <LoadingPanel /> : <><div style={eyebrowStyle}>{stage === "detailed-result" ? "DETAILED SMART-SCORED RESULT" : "SMART-SCORED LIVE RESULT"}</div><h2>{stage === "detailed-result" ? "Your detailed best matches" : "Your best matches"}</h2><p style={mutedStyle}>{stage === "detailed-result" ? "The detailed score adds transparent planning adjustments for entered funds, relevant experience, skill overlap and dependants. It still does not decide admission or visa eligibility." : "The match score is decision support, not an admission guarantee. Missing course requirements are shown as unverified rather than guessed."}</p>{aiMessage && <div style={infoBannerStyle}><strong>{aiMode === "openai" ? "Optional AI scoring active" : "Free transparent scoring"}:</strong> {aiMessage}</div>}{error ? <ErrorBox text={error} /> : <ResultCards results={results} highestQualification={profile.highestQualification} semesterBudget={semesterBudget} fullCourseBudget={fullCourseBudget} />}</>}</section>{stage === "result" && !loading && !error && <section style={{ ...sectionStyle, marginTop: 16 }}><h2>Want a more detailed result?</h2><p style={mutedStyle}>Add funds, experience, skills and dependants without losing your Quick Match answers.</p><button type="button" onClick={() => setStage("detailed")} style={primaryButtonStyle}>Continue to Detailed Assessment</button></section>}{!loading && !error && <MigrationPrompt choice={migrationChoice} setChoice={setMigrationChoice} onContinue={showMigrationResult} />}</>}
 
-      {step === 2 && <div style={panelStyle}>
-        <h2>Your budget</h2>
-        <p style={mutedStyle}>Tell UniPath what tuition range is realistic for you.</p>
-        <div style={gridStyle}>
-          <CurrencyBudgetInput label="Budget for one semester" audCents={profile.semesterTuitionBudgetCents ?? 0} onAudCentsChange={(semesterTuitionBudgetCents) => setProfile((c) => ({ ...c, semesterTuitionBudgetCents, annualTuitionBudgetCents: semesterTuitionBudgetCents * 2 }))} />
-          <CurrencyBudgetInput label="Maximum full course budget" audCents={profile.fullCourseBudgetCents ?? 0} onAudCentsChange={(fullCourseBudgetCents) => setProfile((c) => ({ ...c, fullCourseBudgetCents }))} />
-        </div>
-      </div>}
-
-      {step === 3 && <div style={panelStyle}>
-        <h2>Your location</h2>
-        <p style={mutedStyle}>Choose a city or select one or more states if you are flexible.</p>
-        <SearchableDatabaseSelect label="Preferred location" type="location" value={profile.preferredLocation ?? ""} placeholder="e.g. Melbourne, Ballarat, Sydney" onChange={(preferredLocation) => setProfile((c) => ({ ...c, preferredLocation }))} onSelect={selectLocation} />
-        <div style={{ marginTop: 20 }}><strong>Preferred state(s)</strong><div style={pillRowStyle}>{states.map((state) => <button key={state} type="button" onClick={() => updateState(state)} style={{ ...pillStyle, ...(profile.preferredStates.includes(state) ? selectedPillStyle : {}) }}>{state}</button>)}</div></div>
-        <div style={{ marginTop: 20 }}><strong>Open to regional Australia?</strong><div style={pillRowStyle}><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: true }))} style={{ ...pillStyle, ...(profile.regionalAccepted ? selectedPillStyle : {}) }}>Yes</button><button type="button" onClick={() => setProfile((c) => ({ ...c, regionalAccepted: false }))} style={{ ...pillStyle, ...(!profile.regionalAccepted ? selectedPillStyle : {}) }}>No</button></div></div>
-      </div>}
-
-      {step === 4 && <div style={panelStyle}>
-        <h2>Optional details</h2>
-        <p style={mutedStyle}>Skip anything you do not know. These details only refine the match and entry-requirement checks.</p>
-        <div style={gridStyle}>
-          <SearchableDatabaseSelect label="Preferred study area (optional)" type="course" value={profile.preferredStudy ?? ""} placeholder="e.g. Cyber Security" helper="Leave blank if you want UniPath to infer study areas from your career goal." onChange={(preferredStudy) => setProfile((c) => ({ ...c, preferredStudy }))} />
-          <label style={labelStyle}>English test <span style={optionalLabelStyle}>Optional</span><select value={profile.englishTestType ?? "none"} onChange={(e) => setProfile((c) => ({ ...c, englishTestType: e.target.value as EnglishTestType, englishScore: e.target.value === "none" ? undefined : c.englishScore }))} style={inputStyle}><option value="none">Not taken / skip</option><option value="ielts">IELTS</option><option value="pte">PTE Academic</option></select></label>
-          {(profile.englishTestType ?? "none") !== "none" && <label style={labelStyle}>{profile.englishTestType === "pte" ? "PTE overall score" : "IELTS overall score"}<input type="number" min={0} max={profile.englishTestType === "pte" ? 90 : 9} step={profile.englishTestType === "pte" ? 1 : 0.5} value={profile.englishScore ?? ""} onChange={(e) => setProfile((c) => ({ ...c, englishScore: e.target.value === "" ? undefined : Number(e.target.value) }))} style={inputStyle} /></label>}
-        </div>
-        <div style={{ marginTop: 20 }}><strong>Scholarship preference <span style={optionalLabelStyle}>Optional</span></strong><div style={pillRowStyle}>{([["high","Very important"],["prefer","Prefer if available"],["none","No preference"]] as [ScholarshipImportance,string][]).map(([value,label]) => <button key={value} type="button" onClick={() => setProfile((c) => ({ ...c, scholarshipImportance: value }))} style={{ ...pillStyle, ...((profile.scholarshipImportance ?? "none") === value ? selectedPillStyle : {}) }}>{label}</button>)}</div></div>
-      </div>}
-
-      {validationError && <div style={errorStyle}>{validationError}</div>}
-      <div style={footerStyle}><button type="button" disabled={step === 1} onClick={goBack} style={secondaryButtonStyle}>← Back</button>{step < 4 ? <button type="button" onClick={goNext} style={primaryButtonStyle}>Continue →</button> : <button type="button" onClick={showQuickResult} style={primaryButtonStyle}>Get Match Score →</button>}</div>
-    </section>}
-
-    {(stage === "result" || stage === "detailed-result") && <>
-      <section style={sectionStyle}>
-        {loading ? <LoadingPanel /> : <>
-          <div style={eyebrowStyle}>SMART-SCORED LIVE RESULT</div>
-          <h2>Your best matches</h2>
-          <p style={mutedStyle}>The match score is decision support, not an admission guarantee. Missing course requirements are shown as unverified rather than guessed.</p>
-          {aiMessage && <div style={infoBannerStyle}><strong>{aiMode === "openai" ? "Optional AI scoring active" : "Free transparent scoring"}:</strong> {aiMessage}</div>}
-          {error ? <ErrorBox text={error} /> : <ResultCards results={results} highestQualification={profile.highestQualification} semesterBudget={semesterBudget} fullCourseBudget={fullCourseBudget} />}
-        </>}
-      </section>
-      {stage === "result" && !loading && !error && <section style={{ ...sectionStyle, marginTop: 16 }}><h2>Want a more detailed result?</h2><p style={mutedStyle}>Add funds, experience, skills and dependants without losing your Quick Match answers.</p><button type="button" onClick={() => setStage("detailed")} style={primaryButtonStyle}>Continue to Detailed Assessment</button></section>}
-      {!loading && !error && <MigrationPrompt choice={migrationChoice} setChoice={setMigrationChoice} onContinue={showMigrationResult} />}
-    </>}
-
-    {stage === "detailed" && <section style={sectionStyle}><div style={eyebrowStyle}>DETAILED ASSESSMENT</div><h2>Add more information</h2><div style={gridStyle}><CurrencyBudgetInput label="Total funds available" audCents={profile.totalFundsCents} onAudCentsChange={(totalFundsCents) => setProfile((c) => ({ ...c, totalFundsCents }))} /><label style={labelStyle}>Years of relevant experience<input type="number" min={0} max={40} step={0.5} value={profile.yearsExperience ?? 0} onChange={(e) => setProfile((c) => ({ ...c, yearsExperience: Number(e.target.value) }))} style={inputStyle} /></label><label style={labelStyle}>Skills<input value={(profile.skills ?? []).join(", ")} onChange={(e) => setProfile((c) => ({ ...c, skills: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) }))} style={inputStyle} /></label><label style={labelStyle}>Dependants<input type="number" min={0} max={10} value={profile.dependants ?? 0} onChange={(e) => setProfile((c) => ({ ...c, dependants: Number(e.target.value) }))} style={inputStyle} /></label></div><div style={footerStyle}><button type="button" onClick={() => setStage("result")} style={secondaryButtonStyle}>Back</button><button type="button" onClick={showDetailedResult} style={primaryButtonStyle}>Recalculate Match Score</button></div></section>}
+    {stage === "detailed" && <section style={sectionStyle}><div style={eyebrowStyle}>DETAILED ASSESSMENT</div><h2>Add more information</h2><p style={mutedStyle}>These inputs make small, transparent planning adjustments. Funds are compared with available tuition evidence only; UniPath does not treat this as a government financial-capacity calculation.</p><div style={gridStyle}><CurrencyBudgetInput label="Total funds available" audCents={profile.totalFundsCents} onAudCentsChange={(totalFundsCents) => setProfile((c) => ({ ...c, totalFundsCents }))} /><label style={labelStyle}>Years of relevant experience<input type="number" min={0} max={40} step={0.5} value={profile.yearsExperience ?? 0} onChange={(e) => setProfile((c) => ({ ...c, yearsExperience: Number(e.target.value) }))} style={inputStyle} /></label><label style={labelStyle}>Skills<input value={(profile.skills ?? []).join(", ")} onChange={(e) => setProfile((c) => ({ ...c, skills: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) }))} style={inputStyle} placeholder="e.g. Python, customer service, networking" /></label><label style={labelStyle}>Dependants<input type="number" min={0} max={10} value={profile.dependants ?? 0} onChange={(e) => setProfile((c) => ({ ...c, dependants: Number(e.target.value) }))} style={inputStyle} /></label></div><div style={footerStyle}><button type="button" onClick={() => setStage("result")} style={secondaryButtonStyle}>Back</button><button type="button" onClick={showDetailedResult} style={primaryButtonStyle}>Recalculate Match Score</button></div></section>}
 
     {stage === "migration-result" && <section style={sectionStyle}>{loading ? <LoadingPanel migration /> : <><div style={eyebrowStyle}>MIGRATION-AWARE COMPARISON</div><h2>Migration-aware ranking</h2><p style={mutedStyle}>This stays separate from your original result. UniPath does not guarantee PR, visa eligibility, invitation or skills assessment.</p>{error ? <ErrorBox text={error} /> : <ResultCards results={migrationResults} highestQualification={profile.highestQualification} semesterBudget={semesterBudget} fullCourseBudget={fullCourseBudget} />}<div style={warningStyle}>Migration evidence is used only where source-backed data exists. Missing evidence receives no invented advantage.</div><div style={footerStyle}><button type="button" onClick={() => setStage("result")} style={secondaryButtonStyle}>Back to original result</button><Link href="/local-v2/migration" style={linkButtonStyle}>Open Migration Explorer</Link></div></>}</section>}
   </main>;
 }
 
-function LoadingPanel({ migration = false }: { migration?: boolean }) {
-  return <div style={loadingPanelStyle} role="status" aria-live="polite" aria-busy="true">
-    <svg width="64" height="64" viewBox="0 0 50 50" aria-hidden="true" style={{ flex: "0 0 auto" }}>
-      <circle cx="25" cy="25" r="19" fill="none" stroke="#dbe8f8" strokeWidth="6" />
-      <path d="M25 6a19 19 0 0 1 19 19" fill="none" stroke="#0057b8" strokeWidth="6" strokeLinecap="round">
-        <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.8s" repeatCount="indefinite" />
-      </path>
-    </svg>
-    <div>
-      <div style={loadingTitleStyle}>{migration ? "Rechecking with migration evidence…" : "Finding your best matches…"}</div>
-      <div style={loadingCopyStyle}>{migration ? "Comparing the current shortlist with source-backed migration evidence where it exists." : "Checking live courses, career alignment, tuition, location and available entry evidence."}</div>
-      <div style={loadingDotsStyle} aria-hidden="true"><span>●</span><span>●</span><span>●</span></div>
-    </div>
-  </div>;
-}
+function LoadingPanel({ migration = false }: { migration?: boolean }) { return <div style={loadingPanelStyle} role="status" aria-live="polite" aria-busy="true"><svg width="64" height="64" viewBox="0 0 50 50" aria-hidden="true" style={{ flex: "0 0 auto" }}><circle cx="25" cy="25" r="19" fill="none" stroke="#dbe8f8" strokeWidth="6" /><path d="M25 6a19 19 0 0 1 19 19" fill="none" stroke="#0057b8" strokeWidth="6" strokeLinecap="round"><animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.8s" repeatCount="indefinite" /></path></svg><div><div style={loadingTitleStyle}>{migration ? "Rechecking with migration evidence…" : "Finding your best matches…"}</div><div style={loadingCopyStyle}>{migration ? "Comparing the current shortlist with source-backed migration evidence where it exists." : "Checking live courses, career alignment, tuition, location and available entry evidence."}</div><div style={loadingDotsStyle} aria-hidden="true"><span>●</span><span>●</span><span>●</span></div></div></div>; }
 
-function feeEvidencePresentation(evidence?: FeeEvidence) {
-  if (!evidence) return { label: "Fee evidence not supplied", style: feeEvidenceNeutralStyle };
-  if (evidence.source === "verified_course_fee") return { label: evidence.feeYear ? `Verified ${evidence.feeYear} fee` : "Verified course fee", style: feeEvidenceVerifiedStyle };
-  if (evidence.source === "estimated_course_fee") return { label: evidence.feeYear ? `Estimated ${evidence.feeYear} fee` : "Estimated course fee", style: feeEvidenceEstimatedStyle };
-  if (evidence.source === "cricos_tuition_total") return { label: "CRICOS-derived tuition", style: feeEvidenceDerivedStyle };
-  if (evidence.source === "course_record") return { label: "Course-record fee", style: feeEvidenceNeutralStyle };
-  return { label: "Fee unavailable", style: feeEvidenceMissingStyle };
-}
+function feeEvidencePresentation(evidence?: FeeEvidence) { if (!evidence) return { label: "Fee evidence not supplied", style: feeEvidenceNeutralStyle }; if (evidence.source === "verified_course_fee") return { label: evidence.feeYear ? `Verified ${evidence.feeYear} fee` : "Verified course fee", style: feeEvidenceVerifiedStyle }; if (evidence.source === "estimated_course_fee") return { label: evidence.feeYear ? `Estimated ${evidence.feeYear} fee` : "Estimated course fee", style: feeEvidenceEstimatedStyle }; if (evidence.source === "cricos_tuition_total") return { label: "CRICOS-derived tuition", style: feeEvidenceDerivedStyle }; if (evidence.source === "course_record") return { label: "Course-record fee", style: feeEvidenceNeutralStyle }; return { label: "Fee unavailable", style: feeEvidenceMissingStyle }; }
+function careerEvidencePresentation(match?: CareerMatch) { if (!match) return { label: "Career evidence not supplied", style: careerEvidenceNeutralStyle, note: "No structured career-match evidence was returned for this result." }; if (match.source === "explicit_mapping") return { label: "Explicit UniPath mapping", style: careerEvidenceMappedStyle, note: "An explicit course-to-career mapping is loaded in UniPath. This is still not an employment, registration, skills-assessment or migration guarantee." }; if (match.source === "osca_metadata_inference") return { label: "OSCA-informed inference", style: careerEvidenceInferredStyle, note: "UniPath inferred course relevance using the selected ABS OSCA occupation identity and metadata. ABS does not recommend or endorse this course." }; return { label: "UniPath text inference", style: careerEvidenceNeutralStyle, note: "Career relevance was inferred from course and study-field text because no stronger structured mapping was available." }; }
+function entryEvidencePresentation(evidence?: EntryEvidence) { if (!evidence || evidence.level === "not_loaded") return { label: "Requirements not loaded", style: entryEvidenceMissingStyle, note: evidence?.note ?? "No course-specific entry requirement record is currently loaded. UniPath lowers confidence instead of guessing eligibility." }; if (evidence.level === "source_backed") return { label: evidence.label, style: entryEvidenceVerifiedStyle, note: evidence.note }; if (evidence.level === "partial") return { label: evidence.label, style: entryEvidencePartialStyle, note: evidence.note }; return { label: evidence.label, style: entryEvidenceNeutralStyle, note: evidence.note }; }
 
-function careerEvidencePresentation(match?: CareerMatch) {
-  if (!match) return { label: "Career evidence not supplied", style: careerEvidenceNeutralStyle, note: "No structured career-match evidence was returned for this result." };
-  if (match.source === "explicit_mapping") return { label: "Explicit UniPath mapping", style: careerEvidenceMappedStyle, note: "An explicit course-to-career mapping is loaded in UniPath. This is still not an employment, registration, skills-assessment or migration guarantee." };
-  if (match.source === "osca_metadata_inference") return { label: "OSCA-informed inference", style: careerEvidenceInferredStyle, note: "UniPath inferred course relevance using the selected ABS OSCA occupation identity and metadata. ABS does not recommend or endorse this course." };
-  return { label: "UniPath text inference", style: careerEvidenceNeutralStyle, note: "Career relevance was inferred from course and study-field text because no stronger structured mapping was available." };
-}
-
-function entryEvidencePresentation(evidence?: EntryEvidence) {
-  if (!evidence || evidence.level === "not_loaded") return { label: "Requirements not loaded", style: entryEvidenceMissingStyle, note: evidence?.note ?? "No course-specific entry requirement record is currently loaded. UniPath lowers confidence instead of guessing eligibility." };
-  if (evidence.level === "source_backed") return { label: evidence.label, style: entryEvidenceVerifiedStyle, note: evidence.note };
-  if (evidence.level === "partial") return { label: evidence.label, style: entryEvidencePartialStyle, note: evidence.note };
-  return { label: evidence.label, style: entryEvidenceNeutralStyle, note: evidence.note };
-}
+function DetailedAssessmentPanel({ assessment }: { assessment: DetailedAssessment }) { return <div style={detailedAssessmentPanelStyle}><div style={qualificationTopStyle}><strong>Detailed profile adjustment</strong><span style={qualificationBadgeStyle}>{assessment.adjustment >= 0 ? "+" : ""}{assessment.adjustment} points</span></div><div style={scoreGridStyle}><span>Funds <strong>{assessment.funding.score}%</strong></span><span>Experience <strong>{assessment.experience.score}%</strong></span><span>Skills <strong>{assessment.skills.score}%</strong></span><span>Dependants planning <strong>{assessment.dependants.score}%</strong></span></div><div style={qualificationNoteStyle}><strong>{assessment.funding.label}:</strong> {assessment.funding.note}</div><div style={qualificationNoteStyle}><strong>{assessment.experience.label}:</strong> {assessment.experience.note}</div><div style={qualificationNoteStyle}><strong>{assessment.skills.label}:</strong> {assessment.skills.note}</div><div style={qualificationNoteStyle}><strong>{assessment.dependants.label}:</strong> {assessment.dependants.note}</div></div>; }
 
 function ResultCards({ results, highestQualification, semesterBudget, fullCourseBudget }: { results: LiveRecommendation[]; highestQualification: string; semesterBudget: number; fullCourseBudget: number }) {
   if (!results.length) return <div style={emptyStyle}>No live course records matched these preferences. Try a broader study area or location.</div>;
   return <div style={{ display: "grid", gap: 16, marginTop: 18 }}>{results.slice(0, 8).map((item, index) => {
-    const score = item.ai?.aiScore ?? item.scores.overall;
-    const status = item.ai?.eligibilityStatus ?? "requirements_not_verified";
-    const statusLabel = status === "likely_meets" ? "Likely meets loaded requirements" : status === "needs_review" ? "Needs eligibility review" : "Requirements not verified";
-    const confidenceLabel = item.ai?.confidence ? `${item.ai.confidence.charAt(0).toUpperCase()}${item.ai.confidence.slice(1)} evidence confidence` : null;
-    const progressionScore = item.ai?.scoreBreakdown?.qualificationReadiness;
-    const progressionLabel = progressionScore == null ? "Not assessed" : progressionScore >= 80 ? "Strong level fit" : progressionScore >= 70 ? "Reasonable level fit" : progressionScore >= 60 ? "Pathway / requirements check" : "Closer review needed";
-    const feeEvidence = feeEvidencePresentation(item.feeEvidence);
-    const careerEvidence = careerEvidencePresentation(item.careerMatch);
-    const entryEvidence = entryEvidencePresentation(item.ai?.entryEvidence);
-    const osca = item.careerMatch?.oscaOccupation;
+    const score = item.ai?.aiScore ?? item.scores.overall; const status = item.ai?.eligibilityStatus ?? "requirements_not_verified"; const statusLabel = status === "likely_meets" ? "Likely meets loaded requirements" : status === "needs_review" ? "Needs eligibility review" : "Requirements not verified"; const confidenceLabel = item.ai?.confidence ? `${item.ai.confidence.charAt(0).toUpperCase()}${item.ai.confidence.slice(1)} evidence confidence` : null; const progressionScore = item.ai?.scoreBreakdown?.qualificationReadiness; const progressionLabel = progressionScore == null ? "Not assessed" : progressionScore >= 80 ? "Strong level fit" : progressionScore >= 70 ? "Reasonable level fit" : progressionScore >= 60 ? "Pathway / requirements check" : "Closer review needed"; const feeEvidence = feeEvidencePresentation(item.feeEvidence); const careerEvidence = careerEvidencePresentation(item.careerMatch); const entryEvidence = entryEvidencePresentation(item.ai?.entryEvidence); const osca = item.careerMatch?.oscaOccupation;
     return <article key={item.course.id} style={cardStyle}><div style={topRowStyle}><div><div style={rankStyle}>#{index + 1} {index === 0 ? "Best match" : "Alternative"}</div><h3 style={{ fontSize: 23, margin: "6px 0" }}>{item.course.name}</h3><div style={{ fontWeight: 800, color: "#0057b8" }}>{item.university.name}</div><div style={mutedStyle}>{item.campus.name}{item.campus.city ? ` · ${item.campus.city}` : ""}{item.campus.state ? `, ${item.campus.state}` : ""} {item.campus.regional ? "· Regional" : ""}</div></div><div style={scoreStyle}><div style={{ fontSize: 11 }}>MATCH SCORE</div>{score}%</div></div>
       <div style={status === "likely_meets" ? successStyle : status === "needs_review" ? warningStyle : neutralStyle}><strong>{statusLabel}</strong>{confidenceLabel && <span> · {confidenceLabel}</span>}{item.ai?.entryRequirement?.source_url && <a href={item.ai.entryRequirement.source_url} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>source ↗</a>}</div>
+      {item.ai?.detailedAssessment && <DetailedAssessmentPanel assessment={item.ai.detailedAssessment} />}
       <div style={entryEvidencePanelStyle}><div style={qualificationTopStyle}><strong>Entry requirement evidence</strong><span style={entryEvidence.style}>{entryEvidence.label}</span></div><div style={entryEvidenceMetaStyle}><span>{item.ai?.entryEvidence ? `${item.ai.entryEvidence.checkedFields} structured field${item.ai.entryEvidence.checkedFields === 1 ? "" : "s"} loaded` : "No structured requirement fields returned"}</span>{item.ai?.entryRequirement?.verified_at && <span>Verified {new Date(item.ai.entryRequirement.verified_at).toLocaleDateString("en-AU")}</span>}</div><div style={qualificationNoteStyle}>{entryEvidence.note} This evidence classification supports confidence and ranking only; it is not an admission decision.{item.ai?.entryRequirement?.source_url && <a href={item.ai.entryRequirement.source_url} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>entry source ↗</a>}</div></div>
       <div style={qualificationProgressStyle}><div style={qualificationTopStyle}><strong>Qualification progression</strong><span style={qualificationBadgeStyle}>{progressionLabel}{progressionScore != null ? ` · ${progressionScore}%` : ""}</span></div><div style={qualificationPathStyle}><span>{highestQualification || "Not entered"}</span><span aria-hidden="true">→</span><span>{item.course.qualificationLevel || "Course level not loaded"}</span></div><div style={qualificationNoteStyle}>This measures study-level progression fit only. It is not proof of admission, credit, advanced standing or eligibility.</div></div>
       <div style={careerEvidencePanelStyle}><div style={qualificationTopStyle}><strong>Career evidence</strong><span style={careerEvidence.style}>{careerEvidence.label}</span></div>{osca && <div style={careerPathStyle}><span>{osca.name}</span><span style={oscaCodeStyle}>OSCA {osca.code}</span>{osca.sourceRelease && <span style={careerSourceStyle}>{osca.sourceRelease}</span>}</div>}<div style={qualificationNoteStyle}>{careerEvidence.note}{item.careerMatch?.linkedOccupations?.length ? ` Linked UniPath occupation records: ${item.careerMatch.linkedOccupations.slice(0, 3).join(", ")}${item.careerMatch.linkedOccupations.length > 3 ? "…" : ""}.` : ""}</div></div>
@@ -391,6 +287,7 @@ const scoreGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,
 const feeGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginTop: 10 } as const;
 const infoStyle = { border: "1px solid #e3e7ee", borderRadius: 10, padding: 11, background: "#fff" } as const;
 const infoLabelStyle = { color: "#667085", fontSize: 12, marginBottom: 4 } as const;
+const detailedAssessmentPanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #c7d7fe", background: "#f5f8ff" } as const;
 const entryEvidencePanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #d7e3f4", background: "#fcfdff" } as const;
 const entryEvidenceMetaStyle = { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8, color: "#475467", fontSize: 12, fontWeight: 700 } as const;
 const entryEvidenceVerifiedStyle = { fontSize: 12, fontWeight: 850, color: "#067647", background: "#ecfdf3", border: "1px solid #abefc6", borderRadius: 999, padding: "4px 8px" } as const;
