@@ -50,9 +50,15 @@ type FeeEvidence = {
   verificationStatus: string | null;
   note: string;
 };
+type CareerMatch = {
+  source: "explicit_mapping" | "osca_metadata_inference" | "inferred_text" | string;
+  linkedOccupations: string[];
+  oscaOccupation: { code: string; name: string; sourceRelease: string | null } | null;
+};
 type LiveRecommendation = {
   course: { id: string; name: string; qualificationLevel: string | null; cricosCode: string | null; durationMonths: number | null; annualFee: number | null; totalFee: number | null; currency: string; deliveryMode: string | null; officialCourseUrl: string | null; studyField: string | null };
   feeEvidence?: FeeEvidence;
+  careerMatch?: CareerMatch;
   university: { id: string; name: string; website: string | null; logoUrl: string | null; cricosCode: string | null };
   campus: { id: string; name: string; city: string | null; state: string | null; postcode: string | null; regional: boolean; regional_verified: boolean | null; regional_classification: string | null };
   scholarship: { id: string; name: string; percentage: number | null; amount: number | null } | null;
@@ -271,6 +277,13 @@ function feeEvidencePresentation(evidence?: FeeEvidence) {
   return { label: "Fee unavailable", style: feeEvidenceMissingStyle };
 }
 
+function careerEvidencePresentation(match?: CareerMatch) {
+  if (!match) return { label: "Career evidence not supplied", style: careerEvidenceNeutralStyle, note: "No structured career-match evidence was returned for this result." };
+  if (match.source === "explicit_mapping") return { label: "Explicit UniPath mapping", style: careerEvidenceMappedStyle, note: "An explicit course-to-career mapping is loaded in UniPath. This is still not an employment, registration, skills-assessment or migration guarantee." };
+  if (match.source === "osca_metadata_inference") return { label: "OSCA-informed inference", style: careerEvidenceInferredStyle, note: "UniPath inferred course relevance using the selected ABS OSCA occupation identity and metadata. ABS does not recommend or endorse this course." };
+  return { label: "UniPath text inference", style: careerEvidenceNeutralStyle, note: "Career relevance was inferred from course and study-field text because no stronger structured mapping was available." };
+}
+
 function ResultCards({ results, highestQualification }: { results: LiveRecommendation[]; highestQualification: string }) {
   if (!results.length) return <div style={emptyStyle}>No live course records matched these preferences. Try a broader study area or location.</div>;
   return <div style={{ display: "grid", gap: 16, marginTop: 18 }}>{results.slice(0, 8).map((item, index) => {
@@ -281,9 +294,12 @@ function ResultCards({ results, highestQualification }: { results: LiveRecommend
     const progressionScore = item.ai?.scoreBreakdown?.qualificationReadiness;
     const progressionLabel = progressionScore == null ? "Not assessed" : progressionScore >= 80 ? "Strong level fit" : progressionScore >= 70 ? "Reasonable level fit" : progressionScore >= 60 ? "Pathway / requirements check" : "Closer review needed";
     const feeEvidence = feeEvidencePresentation(item.feeEvidence);
+    const careerEvidence = careerEvidencePresentation(item.careerMatch);
+    const osca = item.careerMatch?.oscaOccupation;
     return <article key={item.course.id} style={cardStyle}><div style={topRowStyle}><div><div style={rankStyle}>#{index + 1} {index === 0 ? "Best match" : "Alternative"}</div><h3 style={{ fontSize: 23, margin: "6px 0" }}>{item.course.name}</h3><div style={{ fontWeight: 800, color: "#0057b8" }}>{item.university.name}</div><div style={mutedStyle}>{item.campus.name}{item.campus.city ? ` · ${item.campus.city}` : ""}{item.campus.state ? `, ${item.campus.state}` : ""} {item.campus.regional ? "· Regional" : ""}</div></div><div style={scoreStyle}><div style={{ fontSize: 11 }}>MATCH SCORE</div>{score}%</div></div>
       <div style={status === "likely_meets" ? successStyle : status === "needs_review" ? warningStyle : neutralStyle}><strong>{statusLabel}</strong>{confidenceLabel && <span> · {confidenceLabel}</span>}{item.ai?.entryRequirement?.source_url && <a href={item.ai.entryRequirement.source_url} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>source ↗</a>}</div>
       <div style={qualificationProgressStyle}><div style={qualificationTopStyle}><strong>Qualification progression</strong><span style={qualificationBadgeStyle}>{progressionLabel}{progressionScore != null ? ` · ${progressionScore}%` : ""}</span></div><div style={qualificationPathStyle}><span>{highestQualification || "Not entered"}</span><span aria-hidden="true">→</span><span>{item.course.qualificationLevel || "Course level not loaded"}</span></div><div style={qualificationNoteStyle}>This measures study-level progression fit only. It is not proof of admission, credit, advanced standing or eligibility.</div></div>
+      <div style={careerEvidencePanelStyle}><div style={qualificationTopStyle}><strong>Career evidence</strong><span style={careerEvidence.style}>{careerEvidence.label}</span></div>{osca && <div style={careerPathStyle}><span>{osca.name}</span><span style={oscaCodeStyle}>OSCA {osca.code}</span>{osca.sourceRelease && <span style={careerSourceStyle}>{osca.sourceRelease}</span>}</div>}<div style={qualificationNoteStyle}>{careerEvidence.note}{item.careerMatch?.linkedOccupations?.length ? ` Linked UniPath occupation records: ${item.careerMatch.linkedOccupations.slice(0, 3).join(", ")}${item.careerMatch.linkedOccupations.length > 3 ? "…" : ""}.` : ""}</div></div>
       <div style={scoreGridStyle}><span>Course relevance <strong>{item.scores.academic}%</strong></span><span>Career <strong>{item.scores.career}%</strong></span><span>Budget <strong>{item.scores.affordability}%</strong></span><span>Location <strong>{item.scores.location}%</strong></span><span>Base score <strong>{item.scores.overall}%</strong></span>{item.ai?.scoreBreakdown && <span>Eligibility evidence <strong>{item.ai.scoreBreakdown.eligibilityEvidence}%</strong></span>}</div>
       <div style={feeEvidencePanelStyle}><div style={qualificationTopStyle}><strong>Tuition evidence</strong><span style={feeEvidence.style}>{feeEvidence.label}</span></div><div style={qualificationNoteStyle}>{item.feeEvidence?.note ?? "No fee-source metadata was returned for this result. Confirm tuition with the university before applying."}{item.feeEvidence?.derivedAnnual ? " The annual amount is derived rather than a direct annual quote." : ""}{item.feeEvidence?.sourceUrl && <a href={item.feeEvidence.sourceUrl} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>fee source ↗</a>}</div></div>
       <div style={feeGridStyle}><Info label="Annual tuition" value={money(item.course.annualFee, item.course.currency)} /><Info label="Total tuition" value={money(item.course.totalFee, item.course.currency)} /><Info label="Duration" value={item.course.durationMonths ? `${item.course.durationMonths} months` : "Not loaded"} /><Info label="Living cost" value={item.livingCost ? `${money(item.livingCost.weeklyLow)}–${money(item.livingCost.weeklyHigh)}/week` : "Not loaded"} /></div>
@@ -333,6 +349,13 @@ const qualificationTopStyle = { display: "flex", justifyContent: "space-between"
 const qualificationBadgeStyle = { fontSize: 12, fontWeight: 850, color: "#0057b8", background: "#eaf3ff", borderRadius: 999, padding: "4px 8px" } as const;
 const qualificationPathStyle = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8, fontSize: 13, fontWeight: 700, color: "#344054" } as const;
 const qualificationNoteStyle = { marginTop: 7, color: "#667085", fontSize: 12, lineHeight: 1.45 } as const;
+const careerEvidencePanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #d8e5f7", background: "#f8fbff" } as const;
+const careerEvidenceMappedStyle = { fontSize: 12, fontWeight: 850, color: "#067647", background: "#ecfdf3", border: "1px solid #abefc6", borderRadius: 999, padding: "4px 8px" } as const;
+const careerEvidenceInferredStyle = { fontSize: 12, fontWeight: 850, color: "#175cd3", background: "#eff8ff", border: "1px solid #b2ddff", borderRadius: 999, padding: "4px 8px" } as const;
+const careerEvidenceNeutralStyle = { fontSize: 12, fontWeight: 850, color: "#475467", background: "#f8fafc", border: "1px solid #d0d5dd", borderRadius: 999, padding: "4px 8px" } as const;
+const careerPathStyle = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8, fontSize: 13, fontWeight: 750, color: "#344054" } as const;
+const oscaCodeStyle = { fontSize: 12, fontWeight: 850, color: "#175cd3", background: "#eff8ff", borderRadius: 999, padding: "3px 7px" } as const;
+const careerSourceStyle = { fontSize: 11, color: "#667085", fontWeight: 650 } as const;
 const feeEvidencePanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #e1e6ed", background: "#fff" } as const;
 const feeEvidenceVerifiedStyle = { fontSize: 12, fontWeight: 850, color: "#067647", background: "#ecfdf3", border: "1px solid #abefc6", borderRadius: 999, padding: "4px 8px" } as const;
 const feeEvidenceEstimatedStyle = { fontSize: 12, fontWeight: 850, color: "#9a3412", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 999, padding: "4px 8px" } as const;
