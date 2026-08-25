@@ -55,10 +55,11 @@ export function SearchableDatabaseSelect({
       setLoading(true);
       setError("");
       try {
-        const response = await fetch(
-          `/api/local-v2/search-options?type=${encodeURIComponent(type)}&q=${encodeURIComponent(query)}`,
-          { signal: controller.signal },
-        );
+        const endpoint = type === "qualification"
+          ? `/api/local-v2/prior-qualifications?q=${encodeURIComponent(query)}`
+          : `/api/local-v2/search-options?type=${encodeURIComponent(type)}&q=${encodeURIComponent(query)}`;
+
+        const response = await fetch(endpoint, { signal: controller.signal });
 
         const contentType = response.headers.get("content-type") ?? "";
         if (!contentType.toLowerCase().includes("application/json")) {
@@ -128,7 +129,7 @@ export function SearchableDatabaseSelect({
       {open && (
         <div style={menuStyle}>
           <div style={menuHeaderStyle}>
-            <span>{loading ? "Searching UniPath database…" : "Suggestions from UniPath database"}</span>
+            <span>{loading ? "Searching UniPath database…" : type === "qualification" ? "Prior qualifications from UniPath database" : "Suggestions from UniPath database"}</span>
             <span style={sourceBadgeStyle}>DB</span>
           </div>
           {error && <div style={errorStyle}>{error}</div>}
