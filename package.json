@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "course-links": "node scripts/fetch-official-course-links.mjs"
+    "course-links": "node scripts/fetch-official-course-links.mjs",
+    "course-links:rmit": "node scripts/import-rmit-course-catalogue.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
