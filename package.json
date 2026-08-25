@@ -11,7 +11,8 @@
     "course-links:rmit": "node scripts/import-rmit-course-catalogue.mjs",
     "course-links:rmit:verify": "node scripts/verify-rmit-course-links.mjs",
     "course-links:monash": "node scripts/import-monash-handbook-browser.mjs",
-    "course-links:deakin": "node scripts/import-deakin-handbook-catalogue.mjs"
+    "course-links:deakin": "node scripts/import-deakin-handbook-catalogue.mjs",
+    "course-links:deakin:verify": "node scripts/verify-deakin-course-links.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
