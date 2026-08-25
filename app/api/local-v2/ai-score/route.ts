@@ -52,6 +52,15 @@ type EntryRequirement = {
   verified_at: string | null;
 };
 
+type EntryEvidenceLevel = "source_backed" | "partial" | "loaded_unverified" | "not_loaded";
+type EntryEvidence = {
+  level: EntryEvidenceLevel;
+  label: string;
+  sourceBacked: boolean;
+  checkedFields: number;
+  note: string;
+};
+
 type PriorQualificationMetadata = {
   label: string;
   scoring_kind: string | null;
@@ -215,6 +224,29 @@ function fieldRelated(previousField: string | undefined, candidate: Candidate, r
   return previous.some((word) => word.length >= 4 && target.includes(word));
 }
 
+function classifyEntryEvidence(requirement?: EntryRequirement): EntryEvidence {
+  if (!requirement) {
+    return { level: "not_loaded", label: "Requirements not loaded", sourceBacked: false, checkedFields: 0, note: "No course-specific entry-requirement record is currently loaded, so UniPath lowers evidence confidence rather than guessing eligibility." };
+  }
+
+  const checkedFields = [
+    requirement.academic_text,
+    requirement.minimum_gpa,
+    requirement.relevant_field_required === true ? true : null,
+    requirement.ielts_overall,
+    requirement.pte_overall,
+  ].filter((value) => value != null && value !== "").length;
+  const sourceBacked = Boolean(requirement.source_url && requirement.verified_at);
+
+  if (sourceBacked && checkedFields >= 2) {
+    return { level: "source_backed", label: "Source-backed requirements", sourceBacked: true, checkedFields, note: "A source URL and verification date are loaded with multiple course-entry fields. This supports stronger evidence checks but still does not guarantee admission." };
+  }
+  if ((requirement.source_url || requirement.verified_at) && checkedFields >= 1) {
+    return { level: "partial", label: "Partially sourced requirements", sourceBacked: false, checkedFields, note: "Some course-entry evidence and source metadata are loaded, but the requirement record is incomplete. Manual confirmation is still needed." };
+  }
+  return { level: "loaded_unverified", label: "Loaded requirements · source incomplete", sourceBacked: false, checkedFields, note: "A course-entry record exists, but source/verification metadata is incomplete. UniPath treats it as guidance, not verified eligibility evidence." };
+}
+
 function applyCareerGate(score: number, careerScore: number) {
   if (careerScore <= 35) return Math.min(score, 60);
   if (careerScore < 50) return Math.min(score, 68);
@@ -224,6 +256,7 @@ function applyCareerGate(score: number, careerScore: number) {
 function fallbackScore(candidate: Candidate, requirement: EntryRequirement | undefined, profile: Profile, priorQualification?: PriorQualificationMetadata | null) {
   const reasons: string[] = [];
   const cautions: string[] = [];
+  const entryEvidence = classifyEntryEvidence(requirement);
   let eligibilityStatus: EligibilityStatus = requirement ? "needs_review" : "requirements_not_verified";
   let verifiedChecks = 0;
   let failedChecks = 0;
@@ -310,7 +343,7 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
     }
 
     if (failedChecks > 0) eligibilityStatus = "needs_review";
-    else if (verifiedChecks > 0 && unresolvedChecks === 0) eligibilityStatus = "likely_meets";
+    else if (entryEvidence.level === "source_backed" && verifiedChecks > 0 && unresolvedChecks === 0) eligibilityStatus = "likely_meets";
     else eligibilityStatus = "needs_review";
   } else {
     cautions.push("Course-specific academic and English entry requirements are not yet verified in UniPath.");
@@ -330,10 +363,18 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
   else if (candidate.scores.career < 50) careerAdjustment -= 8;
   if (candidate.scores.career <= 35) careerAdjustment -= 8;
 
-  const evidenceWeight = requirement ? 0.35 : 0.20;
-  const rawFinalScore = clamp(baseFit * (1 - evidenceWeight) + eligibilityEvidence * evidenceWeight + preferenceAdjustment + careerAdjustment);
+  const evidenceWeight = entryEvidence.level === "source_backed" ? 0.35 : entryEvidence.level === "partial" ? 0.30 : entryEvidence.level === "loaded_unverified" ? 0.24 : 0.16;
+  const evidenceQualityAdjustment = entryEvidence.level === "source_backed" ? 1 : entryEvidence.level === "partial" ? 0 : entryEvidence.level === "loaded_unverified" ? -2 : -3;
+  const rawFinalScore = clamp(baseFit * (1 - evidenceWeight) + eligibilityEvidence * evidenceWeight + preferenceAdjustment + careerAdjustment + evidenceQualityAdjustment);
   const finalScore = applyCareerGate(rawFinalScore, candidate.scores.career);
-  const confidence = requirement ? (verifiedChecks >= 2 && unresolvedChecks === 0 ? "high" : "medium") : "low";
+  const confidence = entryEvidence.level === "source_backed" && verifiedChecks >= 2 && unresolvedChecks === 0
+    ? "high"
+    : entryEvidence.level === "source_backed" || entryEvidence.level === "partial"
+      ? "medium"
+      : "low";
+
+  if (entryEvidence.level === "source_backed") reasons.push(`Entry evidence: ${entryEvidence.label}. ${entryEvidence.checkedFields} structured requirement field${entryEvidence.checkedFields === 1 ? " is" : "s are"} loaded with source and verification metadata.`);
+  else cautions.push(`Entry evidence: ${entryEvidence.label}. ${entryEvidence.note}`);
 
   if (candidate.scores.career <= 35) {
     cautions.push("Career relevance is too weak for this career goal, so UniPath capped the final match score even if budget or location fit is strong.");
@@ -364,6 +405,7 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
     aiScore: finalScore,
     eligibilityStatus,
     confidence,
+    entryEvidence,
     scoreBreakdown: { baseCourseFit: baseFit, qualificationReadiness: readiness.score, academicEvidence: academicEvidenceScore, englishEvidence: englishEvidenceScore, fieldEvidence: fieldEvidenceScore, eligibilityEvidence },
     reasons: reasons.slice(0, 6),
     cautions: cautions.slice(0, 6),
@@ -414,7 +456,7 @@ export async function POST(request: NextRequest) {
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ results: fallback, mode: "explainable_fallback", model: null, message: "UniPath used its free transparent scoring engine: career-first live course fit plus source-backed eligibility evidence where available." });
+      return NextResponse.json({ results: fallback, mode: "explainable_fallback", model: null, message: "UniPath used its free transparent scoring engine: career-first course fit plus graded entry-requirement evidence where available." });
     }
 
     const compactCandidates = candidates.map((candidate) => ({
@@ -432,6 +474,7 @@ export async function POST(request: NextRequest) {
       careerMatch: candidate.careerMatch ?? null,
       baseScores: candidate.scores,
       entryRequirement: requirementMap.get(candidate.course.id) ?? null,
+      entryEvidence: classifyEntryEvidence(requirementMap.get(candidate.course.id)),
     }));
 
     const model = process.env.OPENAI_MODEL || "gpt-5-mini";
@@ -440,7 +483,7 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, database-backed prior-qualification metadata, live course data, fee evidence, OSCA career evidence, and source-backed entry requirements. Career relevance is a gating factor: a weak career score must not be rescued by cheap tuition, scholarship, location or generic academic relevance. Respect fee-evidence quality: verified direct/source-supported fees are stronger than estimates or derived CRICOS annualisations, and unavailable fees must not be treated as evidence that a course is affordable. Qualification-level progression is only a fit signal and must never be treated as proof of admission eligibility. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
+        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, database-backed prior-qualification metadata, live course data, fee evidence, OSCA career evidence, and source-backed entry requirements. Career relevance is a gating factor: a weak career score must not be rescued by cheap tuition, scholarship, location or generic academic relevance. Entry-requirement evidence has graded quality: source-backed records with source URL and verification date are stronger than partial or source-incomplete records; missing evidence must lower confidence, never be treated as proof of failure or eligibility. Respect fee-evidence quality: verified direct/source-supported fees are stronger than estimates or derived CRICOS annualisations, and unavailable fees must not be treated as evidence that a course is affordable. Qualification-level progression is only a fit signal and must never be treated as proof of admission eligibility. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Return conservative, explainable scores.",
         input: JSON.stringify({ profile, priorQualificationMetadata: priorQualification, candidates: compactCandidates }),
         text: { format: { type: "json_schema", name: "unipath_ai_scores", strict: true, schema: { type: "object", additionalProperties: false, properties: { results: { type: "array", items: { type: "object", additionalProperties: false, properties: { courseId: { type: "string" }, aiScore: { type: "integer", minimum: 0, maximum: 100 }, eligibilityStatus: { type: "string", enum: ["likely_meets", "needs_review", "requirements_not_verified"] }, reasons: { type: "array", items: { type: "string" }, maxItems: 4 }, cautions: { type: "array", items: { type: "string" }, maxItems: 4 } }, required: ["courseId", "aiScore", "eligibilityStatus", "reasons", "cautions"] } } }, required: ["results"] } } }
       }),
@@ -462,11 +505,11 @@ export async function POST(request: NextRequest) {
       const ai = aiMap.get(fallbackItem.courseId);
       const candidate = candidateMap.get(fallbackItem.courseId);
       return ai && candidate
-        ? { ...fallbackItem, ...ai, aiScore: applyCareerGate(ai.aiScore, candidate.scores.career), entryRequirement: fallbackItem.entryRequirement }
+        ? { ...fallbackItem, ...ai, aiScore: applyCareerGate(ai.aiScore, candidate.scores.career), entryRequirement: fallbackItem.entryRequirement, entryEvidence: fallbackItem.entryEvidence }
         : fallbackItem;
     });
 
-    return NextResponse.json({ results, mode: "openai", model, message: "AI score combines the live UniPath ranking with the evidence supplied to the model, with career relevance kept as a hard ranking guardrail." });
+    return NextResponse.json({ results, mode: "openai", model, message: "AI score combines the live UniPath ranking with graded entry-requirement evidence, while career relevance remains a hard ranking guardrail." });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("AI scoring failed", detail);
