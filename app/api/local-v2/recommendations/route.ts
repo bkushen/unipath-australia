@@ -170,10 +170,24 @@ function inferredCareerScore(occupation: string, oscaOccupation: OscaOccupationR
   return Math.max(direct, domainScore, oscaMetadataScore);
 }
 
-function affordabilityScore(totalFee: number | null, annualFee: number | null, fullBudget: number, semesterBudget: number) {
-  if (!annualFee && !totalFee) return 60;
-  const effectiveAnnual = annualFee ?? (totalFee ? totalFee / 2 : null);
-  const semester = effectiveAnnual ? effectiveAnnual / 2 : null;
+function affordabilityScore(
+  totalFee: number | null,
+  annualFee: number | null,
+  durationMonths: number | null,
+  fullBudget: number,
+  semesterBudget: number,
+) {
+  const semesterTuition = totalFee && durationMonths && durationMonths > 0
+    ? totalFee * (6 / durationMonths)
+    : annualFee
+      ? annualFee / 2
+      : null;
+  const fullCourseTuition = totalFee
+    ? totalFee
+    : annualFee && durationMonths && durationMonths > 0
+      ? annualFee * (durationMonths / 12)
+      : null;
+
   const ratio = (cost: number | null, budget: number) => {
     if (!cost || budget <= 0) return 60;
     const r = cost / budget;
@@ -181,7 +195,13 @@ function affordabilityScore(totalFee: number | null, annualFee: number | null, f
     if (r <= 1) return clamp(100 - (r - 0.8) * 100);
     return clamp(80 - (r - 1) * 120);
   };
-  return clamp(ratio(semester, semesterBudget) * 0.45 + ratio(totalFee, fullBudget) * 0.55);
+
+  const semesterAvailable = semesterTuition != null && semesterTuition > 0 && semesterBudget > 0;
+  const fullAvailable = fullCourseTuition != null && fullCourseTuition > 0 && fullBudget > 0;
+  if (!semesterAvailable && !fullAvailable) return 55;
+  if (semesterAvailable && fullAvailable) return clamp(ratio(semesterTuition, semesterBudget) * 0.45 + ratio(fullCourseTuition, fullBudget) * 0.55);
+  if (semesterAvailable) return ratio(semesterTuition, semesterBudget);
+  return ratio(fullCourseTuition, fullBudget);
 }
 
 type CourseRow = {
@@ -354,7 +374,7 @@ export async function GET(request: NextRequest) {
         else if (fee.source === "course_record") feeCoverage.courseRecord += 1;
         else if (fee.source === "cricos_tuition_total") feeCoverage.cricosTuitionTotal += 1;
         else feeCoverage.unavailable += 1;
-        const affordability = affordabilityScore(fee.totalFee, fee.annualFee, fullBudget, semesterBudget);
+        const affordability = affordabilityScore(fee.totalFee, fee.annualFee, course.duration_months, fullBudget, semesterBudget);
         const studyPreference = textScore(study, course.name, studyField);
         const feeConfidenceAdjustment = fee.source === "unavailable" ? -3 : fee.source === "cricos_tuition_total" ? -1 : fee.source === "estimated_course_fee" ? 0 : 2;
         const preliminaryScore = clamp(academic * 0.32 + career * 0.38 + affordability * 0.20 + studyPreference * 0.10 + feeConfidenceAdjustment);
@@ -388,7 +408,7 @@ export async function GET(request: NextRequest) {
       campusIds.length ? supabase.from("campuses").select("id,name,city,state,postcode,regional,regional_verified,regional_classification").in("id", campusIds) : Promise.resolve({ data: [], error: null }),
       occupationIds.length ? supabase.from("occupations").select("id,name").in("id", occupationIds) : Promise.resolve({ data: [], error: null }),
       scholarshipIds.length ? supabase.from("scholarships").select("id,name,amount,percentage").in("id", scholarshipIds) : Promise.resolve({ data: [], error: null }),
-      campusIds.length ? supabase.from("living_costs").select("campus_id,weekly_low,weekly_high,monthly_estimate,verification_status").in("campus_id", campusIds) : Promise.resolve({ data: [], error: null }),
+      campusIds.length ? supabase.from("living_costs").select("campus_id,weekly_low,weekly_high,monthly_estimate,source_url,verified_at,verification_status").in("campus_id", campusIds) : Promise.resolve({ data: [], error: null }),
     ]);
     if (campusError) throw campusError;
     if (occupationError) throw occupationError;
@@ -495,7 +515,14 @@ export async function GET(request: NextRequest) {
         university: { id: university.id, name: university.name, website: university.website, logoUrl: university.logo_url, cricosCode: university.cricos_code },
         campus: bestCampus.campus,
         scholarship: bestScholarship ? { id: bestScholarship.id, name: bestScholarship.name, percentage: bestScholarship.percentage == null ? null : Number(bestScholarship.percentage), amount: bestScholarship.amount == null ? null : Number(bestScholarship.amount) } : null,
-        livingCost: living ? { weeklyLow: Number(living.weekly_low), weeklyHigh: Number(living.weekly_high), monthlyEstimate: Number(living.monthly_estimate), status: living.verification_status } : null,
+        livingCost: living ? {
+          weeklyLow: Number(living.weekly_low),
+          weeklyHigh: Number(living.weekly_high),
+          monthlyEstimate: Number(living.monthly_estimate),
+          sourceUrl: living.source_url,
+          verifiedAt: living.verified_at,
+          status: living.verification_status,
+        } : null,
         careerMatch: {
           source: careerMatchSource,
           linkedOccupations: occupationNames,
