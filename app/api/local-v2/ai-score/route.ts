@@ -52,8 +52,18 @@ type EntryRequirement = {
   verified_at: string | null;
 };
 
+type PriorQualificationMetadata = {
+  label: string;
+  scoring_kind: string | null;
+  progression_rank: number | null;
+  progression_note: string | null;
+};
+
 type EligibilityStatus = "likely_meets" | "needs_review" | "requirements_not_verified";
 type QualificationKind =
+  | "secondary_below_year12"
+  | "secondary_year12"
+  | "foundation"
   | "non_aqf"
   | "certificate_iii"
   | "certificate_iv"
@@ -68,6 +78,10 @@ type QualificationKind =
   | "doctoral"
   | "unknown";
 
+const qualificationKinds = new Set<QualificationKind>([
+  "secondary_below_year12", "secondary_year12", "foundation", "non_aqf", "certificate_iii", "certificate_iv", "diploma", "advanced_diploma", "associate_degree", "bachelor", "bachelor_honours", "graduate_certificate", "graduate_diploma", "masters", "doctoral", "unknown",
+]);
+
 const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 const tokens = (value: string) => value.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2);
 
@@ -78,9 +92,15 @@ function getSupabase() {
   return createSupabaseClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
 }
 
-function qualificationKind(value?: string | null): QualificationKind {
+function qualificationKind(value?: string | null, metadata?: PriorQualificationMetadata | null): QualificationKind {
+  const metadataKind = metadata?.scoring_kind as QualificationKind | null | undefined;
+  if (metadataKind && qualificationKinds.has(metadataKind)) return metadataKind;
+
   const q = (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   if (!q) return "unknown";
+  if (q.includes("below year 12")) return "secondary_below_year12";
+  if (q.includes("year 12") || q.includes("senior secondary")) return "secondary_year12";
+  if (q.includes("foundation")) return "foundation";
   if (q.includes("doctoral") || q.includes("doctorate") || q.includes("phd")) return "doctoral";
   if (q.includes("master")) return "masters";
   if (q.includes("graduate diploma")) return "graduate_diploma";
@@ -98,112 +118,92 @@ function qualificationKind(value?: string | null): QualificationKind {
 
 function qualificationRank(kind: QualificationKind) {
   switch (kind) {
-    case "certificate_iii": return 1;
-    case "certificate_iv": return 2;
-    case "diploma": return 3;
-    case "advanced_diploma": return 4;
-    case "associate_degree": return 4;
-    case "bachelor": return 5;
-    case "bachelor_honours": return 6;
-    case "graduate_certificate": return 7;
-    case "graduate_diploma": return 8;
-    case "masters": return 9;
-    case "doctoral": return 10;
+    case "secondary_below_year12": return 0;
+    case "secondary_year12": return 1;
+    case "foundation": return 2;
+    case "certificate_iii": return 2;
+    case "certificate_iv": return 3;
+    case "diploma": return 4;
+    case "advanced_diploma": return 5;
+    case "associate_degree": return 5;
+    case "bachelor": return 6;
+    case "bachelor_honours": return 7;
+    case "graduate_certificate": return 8;
+    case "graduate_diploma": return 9;
+    case "masters": return 10;
+    case "doctoral": return 11;
     default: return 0;
   }
 }
 
-function qualificationReadiness(profile: Profile, candidate: Candidate) {
-  const currentKind = qualificationKind(profile.highestQualification);
+function qualificationReadiness(profile: Profile, candidate: Candidate, metadata?: PriorQualificationMetadata | null) {
+  const currentKind = qualificationKind(profile.highestQualification, metadata);
   const targetKind = qualificationKind(candidate.course.qualificationLevel);
-  const current = qualificationRank(currentKind);
+  const current = metadata?.progression_rank != null ? metadata.progression_rank : qualificationRank(currentKind);
   const target = qualificationRank(targetKind);
+  const databaseNote = metadata?.progression_note ? ` ${metadata.progression_note}` : "";
 
-  if (currentKind === "unknown" || targetKind === "unknown" || currentKind === "non_aqf" || targetKind === "non_aqf") {
-    return {
-      score: 65,
-      reason: null,
-      caution: "Qualification-level progression could not be assessed reliably from these labels. Check the university's actual entry requirements.",
-    };
+  if (targetKind === "unknown" || targetKind === "non_aqf") {
+    return { score: 65, reason: null, caution: "The destination qualification level could not be assessed reliably from the course label. Check the university's actual entry requirements." };
+  }
+
+  if (currentKind === "unknown" || currentKind === "non_aqf") {
+    return { score: 60, reason: null, caution: `Your prior qualification needs a manual equivalency check before progression can be assessed confidently.${databaseNote}` };
   }
 
   if (targetKind === "doctoral") {
-    if (currentKind === "masters") {
-      return { score: 82, reason: "Your entered qualification is at a common prior level for doctoral study consideration.", caution: "Doctoral admission normally depends on research preparation and course-specific criteria, which still require verification." };
-    }
-    if (currentKind === "bachelor_honours" || currentKind === "graduate_diploma") {
-      return { score: 70, reason: null, caution: "Doctoral entry may be possible through some pathways, but research preparation and course-specific requirements must be checked." };
-    }
-    if (current >= target) {
-      return { score: 76, reason: "Your entered qualification is already at doctoral level.", caution: "This does not establish suitability or admission to another doctoral course." };
-    }
+    if (currentKind === "masters") return { score: 82, reason: "Your entered qualification is at a common prior level for doctoral study consideration.", caution: "Doctoral admission normally depends on research preparation and course-specific criteria, which still require verification." };
+    if (currentKind === "bachelor_honours" || currentKind === "graduate_diploma") return { score: 70, reason: null, caution: "Doctoral entry may be possible through some pathways, but research preparation and course-specific requirements must be checked." };
+    if (current >= target) return { score: 76, reason: "Your entered qualification is already at doctoral level.", caution: "This does not establish suitability or admission to another doctoral course." };
     return { score: 48, reason: null, caution: "The selected course is doctoral level and your entered qualification does not by itself establish a typical direct-entry pathway." };
   }
 
   if (targetKind === "masters") {
-    if (currentKind === "bachelor" || currentKind === "bachelor_honours" || currentKind === "graduate_certificate" || currentKind === "graduate_diploma" || currentKind === "masters" || currentKind === "doctoral") {
+    if (["bachelor", "bachelor_honours", "graduate_certificate", "graduate_diploma", "masters", "doctoral"].includes(currentKind)) {
       return { score: 86, reason: "Your entered qualification level is broadly consistent with common master's-level study pathways.", caution: "Actual admission still depends on the university's course-specific academic, field and equivalency requirements." };
     }
     return { score: 50, reason: null, caution: "This is a master's-level course. A pathway, additional qualification or other evidence may be required; UniPath does not assume direct eligibility." };
   }
 
   if (targetKind === "graduate_certificate" || targetKind === "graduate_diploma") {
-    if (current >= qualificationRank("bachelor")) {
-      return { score: 84, reason: "Your entered qualification level is broadly consistent with common graduate certificate/diploma study pathways.", caution: "Course-specific admission requirements still need verification." };
-    }
+    if (qualificationRank(currentKind) >= qualificationRank("bachelor")) return { score: 84, reason: "Your entered qualification level is broadly consistent with common graduate certificate/diploma study pathways.", caution: "Course-specific admission requirements still need verification." };
     return { score: 52, reason: null, caution: "Graduate certificate/diploma entry often requires prior higher education or another approved pathway; direct eligibility is not assumed." };
   }
 
   if (targetKind === "bachelor_honours") {
-    if (currentKind === "bachelor") {
-      return { score: 84, reason: "Your entered bachelor's level is a plausible progression toward honours study.", caution: "Honours entry often depends on discipline relevance and academic performance, which must be checked." };
-    }
-    if (current >= qualificationRank("bachelor_honours")) {
-      return { score: 76, reason: "Your entered qualification is at or above honours level.", caution: "A higher qualification does not automatically establish admission or that this course is the best progression choice." };
-    }
+    if (currentKind === "bachelor") return { score: 84, reason: "Your entered bachelor's level is a plausible progression toward honours study.", caution: "Honours entry often depends on discipline relevance and academic performance, which must be checked." };
+    if (qualificationRank(currentKind) >= qualificationRank("bachelor_honours")) return { score: 76, reason: "Your entered qualification is at or above honours level.", caution: "A higher qualification does not automatically establish admission or that this course is the best progression choice." };
     return { score: 50, reason: null, caution: "Honours study usually requires an appropriate bachelor's-level pathway; course-specific requirements must be checked." };
   }
 
   if (targetKind === "bachelor") {
-    if (currentKind === "diploma" || currentKind === "advanced_diploma" || currentKind === "associate_degree") {
-      return { score: 80, reason: "Your entered qualification represents a plausible progression toward bachelor's study.", caution: "Any credit, advanced standing or direct entry depends on the university and is not assumed." };
-    }
-    if (currentKind === "certificate_iii" || currentKind === "certificate_iv") {
-      return { score: 66, reason: null, caution: "A bachelor's pathway may be available, but country-specific entry or pathway requirements still need checking." };
-    }
-    if (current >= qualificationRank("bachelor")) {
-      return { score: 76, reason: "Your entered qualification is at or above bachelor's level.", caution: "Studying another bachelor's degree may be suitable for a field change, but progression and admission should be assessed separately." };
-    }
+    if (currentKind === "secondary_year12") return { score: 78, reason: "Year 12-equivalent study is a common starting level for bachelor's applications.", caution: `Country-specific equivalency, subject prerequisites and course entry standards still need verification.${databaseNote}` };
+    if (currentKind === "foundation") return { score: 80, reason: "Foundation Studies is a plausible pathway toward bachelor's-level study.", caution: `Foundation recognition and progression conditions vary by provider and course.${databaseNote}` };
+    if (["diploma", "advanced_diploma", "associate_degree"].includes(currentKind)) return { score: 80, reason: "Your entered qualification represents a plausible progression toward bachelor's study.", caution: "Any credit, advanced standing or direct entry depends on the university and is not assumed." };
+    if (currentKind === "certificate_iii" || currentKind === "certificate_iv") return { score: 66, reason: null, caution: "A bachelor's pathway may be available, but country-specific entry or pathway requirements still need checking." };
+    if (currentKind === "secondary_below_year12") return { score: 50, reason: null, caution: `Further senior-secondary study or a recognised pathway may be needed before bachelor's entry can be considered.${databaseNote}` };
+    if (qualificationRank(currentKind) >= qualificationRank("bachelor")) return { score: 76, reason: "Your entered qualification is at or above bachelor's level.", caution: "Studying another bachelor's degree may be suitable for a field change, but progression and admission should be assessed separately." };
   }
 
   if (targetKind === "associate_degree" || targetKind === "advanced_diploma" || targetKind === "diploma") {
-    if (current > target) {
-      return { score: 72, reason: "Your entered qualification is above the selected course level.", caution: "This may still suit a career change or skills goal, but it is not treated as automatic academic progression." };
-    }
-    if (current >= qualificationRank("certificate_iii")) {
-      return { score: 78, reason: "The selected course level is a plausible next or adjacent study level from your entered qualification.", caution: "Admission and credit depend on provider-specific requirements." };
-    }
+    if (currentKind === "secondary_year12" || currentKind === "foundation") return { score: 80, reason: "Your entered qualification is a plausible starting level for diploma or associate-degree study.", caution: `Provider-specific entry requirements and international equivalency still need verification.${databaseNote}` };
+    if (currentKind === "secondary_below_year12") return { score: 62, reason: null, caution: `A preparatory or senior-secondary pathway may be required before entry to this level.${databaseNote}` };
+    if (qualificationRank(currentKind) > target) return { score: 72, reason: "Your entered qualification is above the selected course level.", caution: "This may still suit a career change or skills goal, but it is not treated as automatic academic progression." };
+    if (qualificationRank(currentKind) >= qualificationRank("certificate_iii")) return { score: 78, reason: "The selected course level is a plausible next or adjacent study level from your entered qualification.", caution: "Admission and credit depend on provider-specific requirements." };
   }
 
   if (targetKind === "certificate_iii" || targetKind === "certificate_iv") {
-    if (current > target) {
-      return { score: 70, reason: "Your entered qualification is above the selected certificate level.", caution: "This course may still be useful for vocational skills, but it is not treated as academic progression." };
-    }
+    if (["secondary_below_year12", "secondary_year12", "foundation"].includes(currentKind)) return { score: 76, reason: "The selected certificate level is a plausible vocational progression from your entered education level.", caution: `Provider-specific age, language, prerequisite and equivalency rules still apply.${databaseNote}` };
+    if (qualificationRank(currentKind) > target) return { score: 70, reason: "Your entered qualification is above the selected certificate level.", caution: "This course may still be useful for vocational skills, but it is not treated as academic progression." };
     return { score: 74, reason: null, caution: "Certificate entry requirements vary by provider and course and still need checking." };
   }
 
-  return {
-    score: current === target ? 74 : 68,
-    reason: null,
-    caution: "Qualification-level fit is only a progression signal, not an admission decision. Check the loaded course requirements and the university's official criteria.",
-  };
+  return { score: qualificationRank(currentKind) === target ? 74 : 68, reason: null, caution: `Qualification-level fit is only a progression signal, not an admission decision.${databaseNote}` };
 }
 
 function extractPercentageRequirement(text: string | null) {
   if (!text) return null;
-  const matches = [...text.matchAll(/(?:minimum\s*)?(\d{2}(?:\.\d+)?)\s*%/gi)]
-    .map((match) => Number(match[1]))
-    .filter((value) => value >= 40 && value <= 95);
+  const matches = [...text.matchAll(/(?:minimum\s*)?(\d{2}(?:\.\d+)?)\s*%/gi)].map((match) => Number(match[1])).filter((value) => value >= 40 && value <= 95);
   return matches.length ? Math.max(...matches) : null;
 }
 
@@ -215,7 +215,7 @@ function fieldRelated(previousField: string | undefined, candidate: Candidate, r
   return previous.some((word) => word.length >= 4 && target.includes(word));
 }
 
-function fallbackScore(candidate: Candidate, requirement: EntryRequirement | undefined, profile: Profile) {
+function fallbackScore(candidate: Candidate, requirement: EntryRequirement | undefined, profile: Profile, priorQualification?: PriorQualificationMetadata | null) {
   const reasons: string[] = [];
   const cautions: string[] = [];
   let eligibilityStatus: EligibilityStatus = requirement ? "needs_review" : "requirements_not_verified";
@@ -223,7 +223,7 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
   let failedChecks = 0;
   let unresolvedChecks = 0;
 
-  const readiness = qualificationReadiness(profile, candidate);
+  const readiness = qualificationReadiness(profile, candidate, priorQualification);
   if (readiness.reason) reasons.push(readiness.reason);
   if (readiness.caution) cautions.push(readiness.caution);
 
@@ -310,18 +310,8 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
     cautions.push("Course-specific academic and English entry requirements are not yet verified in UniPath.");
   }
 
-  const baseFit = clamp(
-    candidate.scores.overall * 0.45 +
-    candidate.scores.career * 0.18 +
-    candidate.scores.academic * 0.12 +
-    candidate.scores.affordability * 0.10 +
-    candidate.scores.location * 0.10 +
-    candidate.scores.migration * 0.05
-  );
-
-  const eligibilityEvidence = requirement
-    ? clamp(readiness.score * 0.25 + academicEvidenceScore * 0.30 + englishEvidenceScore * 0.30 + fieldEvidenceScore * 0.15)
-    : clamp(readiness.score * 0.45 + 55 * 0.55);
+  const baseFit = clamp(candidate.scores.overall * 0.45 + candidate.scores.career * 0.18 + candidate.scores.academic * 0.12 + candidate.scores.affordability * 0.10 + candidate.scores.location * 0.10 + candidate.scores.migration * 0.05);
+  const eligibilityEvidence = requirement ? clamp(readiness.score * 0.25 + academicEvidenceScore * 0.30 + englishEvidenceScore * 0.30 + fieldEvidenceScore * 0.15) : clamp(readiness.score * 0.45 + 55 * 0.55);
 
   let preferenceAdjustment = 0;
   if (profile.scholarshipImportance === "high") preferenceAdjustment += candidate.scholarship ? 4 : -3;
@@ -334,26 +324,17 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
   const confidence = requirement ? (verifiedChecks >= 2 && unresolvedChecks === 0 ? "high" : "medium") : "low";
 
   const feeEvidence = candidate.feeEvidence;
-  if (feeEvidence?.source === "verified_course_fee") {
-    reasons.push(`Tuition evidence: verified${feeEvidence.feeYear ? ` ${feeEvidence.feeYear}` : ""} course-fee evidence is loaded${feeEvidence.derivedAnnual ? "; the annual amount is derived from the loaded total and duration" : ""}.`);
-  } else if (feeEvidence?.source === "estimated_course_fee") {
-    cautions.push(`Tuition evidence: the loaded fee is an estimate${feeEvidence.feeYear ? ` for ${feeEvidence.feeYear}` : ""}; confirm the current international fee with the university before applying.`);
-  } else if (feeEvidence?.source === "cricos_tuition_total") {
-    cautions.push("Tuition evidence: the annual amount is derived from a CRICOS total tuition amount and course duration, not a verified direct annual fee.");
-  } else if (feeEvidence?.source === "course_record") {
-    cautions.push("Tuition evidence: a fee is present in the course record, but it is not labelled as a verified course-fee override; confirm the current international fee with the university.");
-  } else if (feeEvidence?.source === "unavailable") {
-    cautions.push("Tuition evidence: no tuition amount is currently loaded, so budget fit has reduced influence on this recommendation.");
-  }
+  if (feeEvidence?.source === "verified_course_fee") reasons.push(`Tuition evidence: verified${feeEvidence.feeYear ? ` ${feeEvidence.feeYear}` : ""} course-fee evidence is loaded${feeEvidence.derivedAnnual ? "; the annual amount is derived from the loaded total and duration" : ""}.`);
+  else if (feeEvidence?.source === "estimated_course_fee") cautions.push(`Tuition evidence: the loaded fee is an estimate${feeEvidence.feeYear ? ` for ${feeEvidence.feeYear}` : ""}; confirm the current international fee with the university before applying.`);
+  else if (feeEvidence?.source === "cricos_tuition_total") cautions.push("Tuition evidence: the annual amount is derived from a CRICOS total tuition amount and course duration, not a verified direct annual fee.");
+  else if (feeEvidence?.source === "course_record") cautions.push("Tuition evidence: a fee is present in the course record, but it is not labelled as a verified course-fee override; confirm the current international fee with the university.");
+  else if (feeEvidence?.source === "unavailable") cautions.push("Tuition evidence: no tuition amount is currently loaded, so budget fit has reduced influence on this recommendation.");
 
   const osca = candidate.careerMatch?.oscaOccupation;
   if (osca) {
     reasons.push(`Career goal: ${osca.name} · OSCA ${osca.code} (${osca.sourceRelease ?? "OSCA 2024 Version 1.0"}).`);
-    if (candidate.careerMatch?.source === "osca_metadata_inference") {
-      reasons.push("Course-career relevance was inferred by UniPath using the official OSCA occupation metadata; this is not an ABS course recommendation.");
-    } else if (candidate.careerMatch?.source === "explicit_mapping") {
-      reasons.push("This course also has an explicit course-to-career mapping loaded in UniPath.");
-    }
+    if (candidate.careerMatch?.source === "osca_metadata_inference") reasons.push("Course-career relevance was inferred by UniPath using the official OSCA occupation metadata; this is not an ABS course recommendation.");
+    else if (candidate.careerMatch?.source === "explicit_mapping") reasons.push("This course also has an explicit course-to-career mapping loaded in UniPath.");
   }
   if (candidate.scores.career >= 80 && !osca) reasons.push("Strong career-direction alignment in the live recommendation engine.");
   if (candidate.scores.affordability >= 80) reasons.push("Available tuition evidence fits or is close to your stated budget.");
@@ -365,14 +346,7 @@ function fallbackScore(candidate: Candidate, requirement: EntryRequirement | und
     aiScore: finalScore,
     eligibilityStatus,
     confidence,
-    scoreBreakdown: {
-      baseCourseFit: baseFit,
-      qualificationReadiness: readiness.score,
-      academicEvidence: academicEvidenceScore,
-      englishEvidence: englishEvidenceScore,
-      fieldEvidence: fieldEvidenceScore,
-      eligibilityEvidence,
-    },
+    scoreBreakdown: { baseCourseFit: baseFit, qualificationReadiness: readiness.score, academicEvidence: academicEvidenceScore, englishEvidence: englishEvidenceScore, fieldEvidence: fieldEvidenceScore, eligibilityEvidence },
     reasons: reasons.slice(0, 6),
     cautions: cautions.slice(0, 6),
     entryRequirement: requirement ?? null,
@@ -406,23 +380,22 @@ export async function POST(request: NextRequest) {
 
     const courseIds = candidates.map((item) => item.course.id);
     const supabase = getSupabase();
-    const { data: entryRows, error: entryError } = await supabase
-      .from("entry_requirements")
-      .select("course_id,academic_text,minimum_gpa,relevant_field_required,ielts_overall,pte_overall,source_url,verified_at")
-      .in("course_id", courseIds);
-    if (entryError) throw entryError;
+    const entryQuery = supabase.from("entry_requirements").select("course_id,academic_text,minimum_gpa,relevant_field_required,ielts_overall,pte_overall,source_url,verified_at").in("course_id", courseIds);
+    const priorQuery = profile.highestQualification?.trim()
+      ? supabase.from("prior_qualification_levels").select("label,scoring_kind,progression_rank,progression_note").eq("active", true).ilike("label", profile.highestQualification.trim()).limit(1)
+      : Promise.resolve({ data: [], error: null });
 
+    const [{ data: entryRows, error: entryError }, { data: priorRows, error: priorError }] = await Promise.all([entryQuery, priorQuery]);
+    if (entryError) throw entryError;
+    if (priorError) throw priorError;
+
+    const priorQualification = ((priorRows ?? [])[0] as PriorQualificationMetadata | undefined) ?? null;
     const requirementMap = new Map((entryRows ?? []).map((row) => [row.course_id, row as EntryRequirement]));
-    const fallback = candidates.map((candidate) => fallbackScore(candidate, requirementMap.get(candidate.course.id), profile));
+    const fallback = candidates.map((candidate) => fallbackScore(candidate, requirementMap.get(candidate.course.id), profile, priorQualification));
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({
-        results: fallback,
-        mode: "explainable_fallback",
-        model: null,
-        message: "UniPath used its free transparent scoring engine: live course fit plus source-backed eligibility evidence where available.",
-      });
+      return NextResponse.json({ results: fallback, mode: "explainable_fallback", model: null, message: "UniPath used its free transparent scoring engine: live course fit plus source-backed eligibility evidence where available." });
     }
 
     const compactCandidates = candidates.map((candidate) => ({
@@ -448,37 +421,9 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, live course data, fee evidence, OSCA career evidence, and source-backed entry requirements. Respect fee-evidence quality: verified direct/source-supported fees are stronger than estimates or derived CRICOS annualisations, and unavailable fees must not be treated as evidence that a course is affordable. Qualification-level progression is only a fit signal and must never be treated as proof of admission eligibility. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
-        input: JSON.stringify({ profile, candidates: compactCandidates }),
-        text: {
-          format: {
-            type: "json_schema",
-            name: "unipath_ai_scores",
-            strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                results: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      courseId: { type: "string" },
-                      aiScore: { type: "integer", minimum: 0, maximum: 100 },
-                      eligibilityStatus: { type: "string", enum: ["likely_meets", "needs_review", "requirements_not_verified"] },
-                      reasons: { type: "array", items: { type: "string" }, maxItems: 4 },
-                      cautions: { type: "array", items: { type: "string" }, maxItems: 4 }
-                    },
-                    required: ["courseId", "aiScore", "eligibilityStatus", "reasons", "cautions"]
-                  }
-                }
-              },
-              required: ["results"]
-            }
-          }
-        }
+        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, database-backed prior-qualification metadata, live course data, fee evidence, OSCA career evidence, and source-backed entry requirements. Respect fee-evidence quality: verified direct/source-supported fees are stronger than estimates or derived CRICOS annualisations, and unavailable fees must not be treated as evidence that a course is affordable. Qualification-level progression is only a fit signal and must never be treated as proof of admission eligibility. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
+        input: JSON.stringify({ profile, priorQualificationMetadata: priorQualification, candidates: compactCandidates }),
+        text: { format: { type: "json_schema", name: "unipath_ai_scores", strict: true, schema: { type: "object", additionalProperties: false, properties: { results: { type: "array", items: { type: "object", additionalProperties: false, properties: { courseId: { type: "string" }, aiScore: { type: "integer", minimum: 0, maximum: 100 }, eligibilityStatus: { type: "string", enum: ["likely_meets", "needs_review", "requirements_not_verified"] }, reasons: { type: "array", items: { type: "string" }, maxItems: 4 }, cautions: { type: "array", items: { type: "string" }, maxItems: 4 } }, required: ["courseId", "aiScore", "eligibilityStatus", "reasons", "cautions"] } } }, required: ["results"] } } }
       }),
     });
 
