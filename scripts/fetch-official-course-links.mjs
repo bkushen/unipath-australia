@@ -15,12 +15,10 @@ const perUniversityLimit = Number(args.get("limit") ?? 0);
 const delayMs = Number(args.get("delay") ?? 300);
 const minimumConfidence = Number(args.get("threshold") ?? 0.88);
 const maxSitemapFiles = Number(args.get("max-sitemaps") ?? 80);
-const maxCandidatePages = Number(args.get("max-candidates") ?? 4);
+const maxCandidatePages = Number(args.get("max-candidates") ?? 5);
 const outputDir = String(args.get("output-dir") ?? "data/course-link-audits");
 
-if (!selectedUniversity && !runAll) {
-  throw new Error('Choose one university with --university="RMIT University" or use --all.');
-}
+if (!selectedUniversity && !runAll) throw new Error('Choose one university with --university="RMIT University" or use --all.');
 if (!Number.isFinite(delayMs) || delayMs < 0 || delayMs > 10000) throw new Error("--delay must be between 0 and 10000 milliseconds.");
 if (!Number.isFinite(minimumConfidence) || minimumConfidence < 0.5 || minimumConfidence > 1) throw new Error("--threshold must be between 0.5 and 1.");
 if (!Number.isInteger(maxSitemapFiles) || maxSitemapFiles < 1 || maxSitemapFiles > 500) throw new Error("--max-sitemaps must be an integer between 1 and 500.");
@@ -28,7 +26,7 @@ if (!Number.isInteger(maxCandidatePages) || maxCandidatePages < 1 || maxCandidat
 if (!Number.isInteger(perUniversityLimit) || perUniversityLimit < 0) throw new Error("--limit must be a non-negative integer.");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const USER_AGENT = "UniPathAustralia/0.2 (+https://github.com/bkushen/unipath-australia; official university course-link verification)";
+const USER_AGENT = "UniPathAustralia/0.3 (+https://github.com/bkushen/unipath-australia; official university course-link verification)";
 const STOP_WORDS = new Set([
   "a", "an", "and", "at", "for", "in", "of", "on", "or", "the", "to", "with", "by", "from", "into", "study", "course", "courses", "program", "programs", "degree", "degrees", "honours", "honor", "international",
 ]);
@@ -36,8 +34,11 @@ const COURSE_PATH_HINTS = [
   "/course", "/courses", "/study", "/degrees", "/degree", "/program", "/programs", "/undergraduate", "/postgraduate", "/bachelor", "/master", "/masters", "/diploma", "/certificate",
 ];
 const EXCLUDED_PATH_HINTS = [
-  "/news", "/events", "/research/news", "/staff", "/people", "/profiles", "/alumni", "/library", "/contact", "/about", "/media", "/blog", "/article", "/articles",
+  "/news", "/events", "/research/news", "/staff", "/people", "/profiles", "/alumni", "/library", "/contact", "/about", "/media", "/blog", "/article", "/articles", "/entry-requirements", "/inherent-requirements",
 ];
+const SPECIALISATION_TERMS = new Set([
+  "aeronautical", "aerospace", "architectural", "architecture", "civil", "electrical", "electronic", "electronics", "mechanical", "mechatronics", "manufacturing", "automotive", "chemical", "biomedical", "environmental", "telecommunications", "communication", "communications", "software", "computer", "computing", "cyber", "security", "network", "networks", "data", "analytics", "fashion", "textile", "merchandising", "furniture", "aviation", "pilot", "pilots", "screen", "media", "visual", "accounting", "finance", "marketing", "business",
+]);
 
 async function loadEnvFile(path = ".env.local") {
   try {
@@ -58,16 +59,11 @@ async function loadEnvFile(path = ".env.local") {
 }
 
 await loadEnvFile();
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!supabaseUrl || !(serviceRoleKey || publishableKey)) {
-  throw new Error("Supabase environment variables are missing. Use the existing .env.local configuration.");
-}
-if (writeMode && !serviceRoleKey) {
-  throw new Error("--write requires SUPABASE_SERVICE_ROLE_KEY in your local .env.local. Do not paste that secret into source control or chat.");
-}
+if (!supabaseUrl || !(serviceRoleKey || publishableKey)) throw new Error("Supabase environment variables are missing. Use the existing .env.local configuration.");
+if (writeMode && !serviceRoleKey) throw new Error("--write requires SUPABASE_SERVICE_ROLE_KEY in your local .env.local. Do not paste that secret into source control or chat.");
 
 const supabase = createClient(supabaseUrl, serviceRoleKey || publishableKey, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -96,9 +92,7 @@ function decodeXml(value) {
 }
 
 function xmlLocations(xml) {
-  return [...xml.matchAll(/<loc\b[^>]*>([\s\S]*?)<\/loc>/gi)]
-    .map((match) => decodeXml(match[1].trim()))
-    .filter(Boolean);
+  return [...xml.matchAll(/<loc\b[^>]*>([\s\S]*?)<\/loc>/gi)].map((match) => decodeXml(match[1].trim())).filter(Boolean);
 }
 
 function stripHtml(html) {
@@ -131,6 +125,10 @@ function normaliseText(value) {
     .trim();
 }
 
+function compact(value) {
+  return normaliseText(value).replace(/ /g, "");
+}
+
 function tokens(value) {
   return [...new Set(normaliseText(value).split(" ").filter((token) => token.length >= 2 && !STOP_WORDS.has(token)))];
 }
@@ -139,8 +137,7 @@ function tokenCoverage(source, target) {
   const sourceTokens = tokens(source);
   if (!sourceTokens.length) return 0;
   const targetTokens = new Set(tokens(target));
-  const matched = sourceTokens.filter((token) => targetTokens.has(token)).length;
-  return matched / sourceTokens.length;
+  return sourceTokens.filter((token) => targetTokens.has(token)).length / sourceTokens.length;
 }
 
 function tokenJaccard(a, b) {
@@ -170,37 +167,52 @@ function urlText(url) {
   return decodeURIComponent(`${url.pathname} ${url.search}`).replace(/[-_+/=?&]/g, " ");
 }
 
+function specialisationConflict(courseName, headline) {
+  const courseTokens = new Set(tokens(courseName));
+  const headlineTokens = new Set(tokens(headline));
+  const extras = [...headlineTokens].filter((token) => SPECIALISATION_TERMS.has(token) && !courseTokens.has(token));
+  return extras;
+}
+
 function preliminaryCandidateScore(course, url) {
   const pathText = urlText(url);
   const nameCoverage = tokenCoverage(course.name, pathText);
   const jaccard = tokenJaccard(course.name, pathText);
-  const courseCode = normaliseText(course.university_course_code).replace(/ /g, "");
-  const cricosCode = normaliseText(course.cricos_code).replace(/ /g, "");
-  const compactUrl = normaliseText(url.href).replace(/ /g, "");
-  const codeBonus = courseCode && compactUrl.includes(courseCode) ? 0.28 : 0;
-  const cricosBonus = cricosCode && compactUrl.includes(cricosCode) ? 0.24 : 0;
+  const compactUrl = compact(url.href);
+  const courseCode = compact(course.university_course_code);
+  const cricosCode = compact(course.cricos_code);
+  const vetCode = compact(course.vet_national_code);
+  const identifierBonus =
+    (courseCode && compactUrl.includes(courseCode) ? 0.30 : 0) +
+    (cricosCode && compactUrl.includes(cricosCode) ? 0.28 : 0) +
+    (vetCode && compactUrl.includes(vetCode) ? 0.28 : 0);
   const coursePathBonus = pathLooksCourseLike(url) ? 0.08 : 0;
-  return Math.min(1, nameCoverage * 0.56 + jaccard * 0.28 + codeBonus + cricosBonus + coursePathBonus);
+  const conflictPenalty = specialisationConflict(course.name, pathText).length ? 0.16 : 0;
+  return Math.max(0, Math.min(1, nameCoverage * 0.54 + jaccard * 0.28 + identifierBonus + coursePathBonus - conflictPenalty));
 }
 
 function pageVerificationScore(course, url, html) {
   const title = extractTag(html, "title");
   const h1 = extractTag(html, "h1");
-  const pageText = stripHtml(html).slice(0, 140000);
+  const pageText = stripHtml(html).slice(0, 160000);
   const headline = `${title} ${h1} ${urlText(url)}`;
   const titleCoverage = tokenCoverage(course.name, headline);
   const titleJaccard = tokenJaccard(course.name, headline);
   const pageCoverage = tokenCoverage(course.name, pageText);
-  const courseCode = normaliseText(course.university_course_code).replace(/ /g, "");
-  const cricosCode = normaliseText(course.cricos_code).replace(/ /g, "");
-  const compactPage = normaliseText(pageText).replace(/ /g, "");
-  const compactUrl = normaliseText(url.href).replace(/ /g, "");
+  const compactPage = compact(pageText);
+  const compactUrl = compact(url.href);
+  const courseCode = compact(course.university_course_code);
+  const cricosCode = compact(course.cricos_code);
+  const vetCode = compact(course.vet_national_code);
   const courseCodeFound = Boolean(courseCode && (compactPage.includes(courseCode) || compactUrl.includes(courseCode)));
   const cricosFound = Boolean(cricosCode && (compactPage.includes(cricosCode) || compactUrl.includes(cricosCode)));
-  const codeBonus = courseCodeFound ? 0.20 : 0;
-  const cricosBonus = cricosFound ? 0.22 : 0;
-  const score = Math.min(1, titleCoverage * 0.48 + titleJaccard * 0.22 + pageCoverage * 0.18 + codeBonus + cricosBonus);
-  return { score, title, h1, courseCodeFound, cricosFound };
+  const vetCodeFound = Boolean(vetCode && (compactPage.includes(vetCode) || compactUrl.includes(vetCode)));
+  const exactHeadline = normaliseText(title).includes(normaliseText(course.name)) || normaliseText(h1).includes(normaliseText(course.name));
+  const conflicts = specialisationConflict(course.name, `${title} ${h1} ${urlText(url)}`);
+  const identifierBonus = (courseCodeFound ? 0.22 : 0) + (cricosFound ? 0.26 : 0) + (vetCodeFound ? 0.24 : 0);
+  const conflictPenalty = conflicts.length ? 0.22 : 0;
+  const score = Math.max(0, Math.min(1, titleCoverage * 0.44 + titleJaccard * 0.20 + pageCoverage * 0.16 + identifierBonus + (exactHeadline ? 0.08 : 0) - conflictPenalty));
+  return { score, title, h1, courseCodeFound, cricosFound, vetCodeFound, exactHeadline, conflicts };
 }
 
 async function fetchText(url, accept = "text/html,application/xhtml+xml,application/xml,text/xml,text/plain") {
@@ -221,7 +233,7 @@ async function discoverAllowedHosts(website) {
     const response = await fetch(website, { redirect: "follow", method: "GET", headers: { "user-agent": USER_AGENT }, signal: AbortSignal.timeout(15000) });
     if (response.url) hosts.add(new URL(response.url).hostname.replace(/^www\./, ""));
   } catch {
-    // The configured university host is still usable if the homepage blocks automated requests.
+    // Keep the configured host if the homepage blocks automated requests.
   }
   return hosts;
 }
@@ -278,7 +290,7 @@ async function fetchCoursesForUniversity(universityId) {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
       .from("courses")
-      .select("id,name,cricos_code,university_course_code,official_course_url,official_course_url_verified_at")
+      .select("id,name,cricos_code,university_course_code,vet_national_code,official_course_url,official_course_url_verified_at")
       .eq("university_id", universityId)
       .order("name")
       .range(from, from + pageSize - 1);
@@ -306,18 +318,18 @@ async function verifyCourse(course, candidateUrls, allowedHosts) {
     })
     .filter(Boolean)
     .sort((a, b) => b.preliminary - a.preliminary)
-    .slice(0, Math.max(maxCandidatePages * 3, 10));
+    .slice(0, Math.max(maxCandidatePages * 4, 14));
 
-  const shortlist = ranked.filter((item) => item.preliminary >= 0.30).slice(0, maxCandidatePages);
+  const shortlist = ranked.filter((item) => item.preliminary >= 0.25).slice(0, maxCandidatePages);
   let best = null;
   for (const candidate of shortlist) {
     try {
       const { text, finalUrl, contentType } = await fetchText(candidate.url.toString(), "text/html,application/xhtml+xml,*/*");
       if (!contentType.toLowerCase().includes("html") && !/<html\b/i.test(text)) continue;
       const finalParsed = new URL(finalUrl || candidate.url.toString());
-      if (!sameUniversityHost(finalParsed, allowedHosts)) continue;
+      if (!sameUniversityHost(finalParsed, allowedHosts) || !pathLooksCourseLike(finalParsed)) continue;
       const verified = pageVerificationScore(course, finalParsed, text);
-      const combined = Math.min(1, verified.score * 0.82 + candidate.preliminary * 0.18);
+      const combined = Math.min(1, verified.score * 0.86 + candidate.preliminary * 0.14);
       const result = {
         url: finalParsed.toString(),
         confidence: combined,
@@ -325,6 +337,9 @@ async function verifyCourse(course, candidateUrls, allowedHosts) {
         h1: verified.h1,
         courseCodeFound: verified.courseCodeFound,
         cricosFound: verified.cricosFound,
+        vetCodeFound: verified.vetCodeFound,
+        exactHeadline: verified.exactHeadline,
+        conflicts: verified.conflicts,
         preliminary: candidate.preliminary,
       };
       if (!best || result.confidence > best.confidence) best = result;
@@ -362,6 +377,11 @@ for (const university of universities) {
   console.log(`\n=== ${university.name} ===`);
   console.log(`Website: ${website}`);
   const courses = await fetchCoursesForUniversity(university.id);
+  const duplicateNameCounts = new Map();
+  for (const course of courses) {
+    const key = normaliseText(course.name);
+    duplicateNameCounts.set(key, (duplicateNameCounts.get(key) ?? 0) + 1);
+  }
   const pending = courses.filter((course) => refresh || !course.official_course_url);
   const selectedCourses = perUniversityLimit > 0 ? pending.slice(0, perUniversityLimit) : pending;
   console.log(`Courses: ${courses.length}; pending exact links: ${pending.length}; processing: ${selectedCourses.length}`);
@@ -380,23 +400,33 @@ for (const university of universities) {
   let written = 0;
   for (let index = 0; index < selectedCourses.length; index += 1) {
     const course = selectedCourses[index];
+    const duplicateNameCount = duplicateNameCounts.get(normaliseText(course.name)) ?? 1;
     const result = await verifyCourse(course, candidatePages, allowedHosts);
-    const accepted = Boolean(result && result.confidence >= minimumConfidence);
-    let writeStatus = "dry_run";
+    const identifierEvidence = Boolean(result && (result.cricosFound || result.courseCodeFound || result.vetCodeFound));
+    const duplicateSafe = duplicateNameCount === 1 || identifierEvidence;
+    const specialisationSafe = !result?.conflicts?.length || identifierEvidence;
+    const titleSafe = Boolean(result && (result.exactHeadline || identifierEvidence));
+    const accepted = Boolean(result && result.confidence >= minimumConfidence && duplicateSafe && specialisationSafe && titleSafe);
+    let rejectionReason = null;
+    if (result && result.confidence < minimumConfidence) rejectionReason = "below_threshold";
+    else if (result && !duplicateSafe) rejectionReason = "duplicate_name_needs_identifier";
+    else if (result && !specialisationSafe) rejectionReason = `specialisation_conflict:${result.conflicts.join("|")}`;
+    else if (result && !titleSafe) rejectionReason = "title_not_exact_and_no_identifier";
+    else if (!result) rejectionReason = "no_candidate";
 
+    let writeStatus = "dry_run";
     if (accepted && writeMode) {
       const { error } = await supabase
         .from("courses")
         .update({ official_course_url: result.url, official_course_url_verified_at: new Date().toISOString() })
         .eq("id", course.id);
-      if (error) {
-        writeStatus = `write_error:${error.message}`;
-      } else {
+      if (error) writeStatus = `write_error:${error.message}`;
+      else {
         written += 1;
         writeStatus = "written";
       }
     } else if (!accepted) {
-      writeStatus = result ? "below_threshold" : "no_candidate";
+      writeStatus = rejectionReason ?? "review";
     }
 
     if (accepted) matched += 1;
@@ -406,6 +436,8 @@ for (const university of universities) {
       course_name: course.name,
       cricos_code: course.cricos_code,
       university_course_code: course.university_course_code,
+      vet_national_code: course.vet_national_code,
+      duplicate_name_count: duplicateNameCount,
       previous_url: course.official_course_url,
       candidate_url: result?.url ?? null,
       confidence: result ? Number(result.confidence.toFixed(4)) : null,
@@ -413,19 +445,24 @@ for (const university of universities) {
       h1: result?.h1 ?? null,
       cricos_found: result?.cricosFound ?? false,
       course_code_found: result?.courseCodeFound ?? false,
+      vet_code_found: result?.vetCodeFound ?? false,
+      exact_headline: result?.exactHeadline ?? false,
+      specialisation_conflicts: result?.conflicts?.join("|") ?? "",
       accepted,
+      rejection_reason: accepted ? null : rejectionReason,
       write_status: writeStatus,
     });
 
     const confidenceText = result ? result.confidence.toFixed(3) : "none";
-    console.log(`[${index + 1}/${selectedCourses.length}] ${course.name} -> ${accepted ? "MATCH" : "review"} (${confidenceText})${result?.url ? ` ${result.url}` : ""}`);
+    const reasonText = accepted ? "" : rejectionReason ? ` [${rejectionReason}]` : "";
+    console.log(`[${index + 1}/${selectedCourses.length}] ${course.name} -> ${accepted ? "MATCH" : "review"} (${confidenceText})${reasonText}${result?.url ? ` ${result.url}` : ""}`);
   }
 
   const slug = normaliseText(university.name).replace(/ /g, "-");
   const jsonPath = `${outputDir}/${slug}.json`;
   const csvPath = `${outputDir}/${slug}.csv`;
   await writeFile(jsonPath, `${JSON.stringify({ generatedAt: new Date().toISOString(), university: university.name, website, threshold: minimumConfidence, writeMode, rows: auditRows }, null, 2)}\n`, "utf8");
-  const headers = ["university","course_id","course_name","cricos_code","university_course_code","previous_url","candidate_url","confidence","title","h1","cricos_found","course_code_found","accepted","write_status"];
+  const headers = ["university","course_id","course_name","cricos_code","university_course_code","vet_national_code","duplicate_name_count","previous_url","candidate_url","confidence","title","h1","cricos_found","course_code_found","vet_code_found","exact_headline","specialisation_conflicts","accepted","rejection_reason","write_status"];
   const csv = [headers.join(","), ...auditRows.map((row) => headers.map((key) => csvEscape(row[key])).join(","))].join("\n");
   await writeFile(csvPath, `${csv}\n`, "utf8");
 
