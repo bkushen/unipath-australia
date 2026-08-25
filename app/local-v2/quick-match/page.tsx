@@ -260,12 +260,40 @@ export default function QuickMatchPage() {
       <div style={footerStyle}><button type="button" disabled={step === 1} onClick={goBack} style={secondaryButtonStyle}>← Back</button>{step < 4 ? <button type="button" onClick={goNext} style={primaryButtonStyle}>Continue →</button> : <button type="button" onClick={showQuickResult} style={primaryButtonStyle}>Get Match Score →</button>}</div>
     </section>}
 
-    {(stage === "result" || stage === "detailed-result") && <><section style={sectionStyle}><div style={eyebrowStyle}>SMART-SCORED LIVE RESULT</div><h2>Your best matches</h2><p style={mutedStyle}>The match score is decision support, not an admission guarantee. Missing course requirements are shown as unverified rather than guessed.</p>{aiMessage && <div style={infoBannerStyle}><strong>{aiMode === "openai" ? "Optional AI scoring active" : "Free transparent scoring"}:</strong> {aiMessage}</div>}{loading ? <p>Finding live courses and calculating match scores…</p> : error ? <ErrorBox text={error} /> : <ResultCards results={results} highestQualification={profile.highestQualification} />}</section>{stage === "result" && <section style={{ ...sectionStyle, marginTop: 16 }}><h2>Want a more detailed result?</h2><p style={mutedStyle}>Add funds, experience, skills and dependants without losing your Quick Match answers.</p><button type="button" onClick={() => setStage("detailed")} style={primaryButtonStyle}>Continue to Detailed Assessment</button></section>}<MigrationPrompt choice={migrationChoice} setChoice={setMigrationChoice} onContinue={showMigrationResult} /></>}
+    {(stage === "result" || stage === "detailed-result") && <>
+      <section style={sectionStyle}>
+        {loading ? <LoadingPanel /> : <>
+          <div style={eyebrowStyle}>SMART-SCORED LIVE RESULT</div>
+          <h2>Your best matches</h2>
+          <p style={mutedStyle}>The match score is decision support, not an admission guarantee. Missing course requirements are shown as unverified rather than guessed.</p>
+          {aiMessage && <div style={infoBannerStyle}><strong>{aiMode === "openai" ? "Optional AI scoring active" : "Free transparent scoring"}:</strong> {aiMessage}</div>}
+          {error ? <ErrorBox text={error} /> : <ResultCards results={results} highestQualification={profile.highestQualification} />}
+        </>}
+      </section>
+      {stage === "result" && !loading && !error && <section style={{ ...sectionStyle, marginTop: 16 }}><h2>Want a more detailed result?</h2><p style={mutedStyle}>Add funds, experience, skills and dependants without losing your Quick Match answers.</p><button type="button" onClick={() => setStage("detailed")} style={primaryButtonStyle}>Continue to Detailed Assessment</button></section>}
+      {!loading && !error && <MigrationPrompt choice={migrationChoice} setChoice={setMigrationChoice} onContinue={showMigrationResult} />}
+    </>}
 
     {stage === "detailed" && <section style={sectionStyle}><div style={eyebrowStyle}>DETAILED ASSESSMENT</div><h2>Add more information</h2><div style={gridStyle}><CurrencyBudgetInput label="Total funds available" audCents={profile.totalFundsCents} onAudCentsChange={(totalFundsCents) => setProfile((c) => ({ ...c, totalFundsCents }))} /><label style={labelStyle}>Years of relevant experience<input type="number" min={0} max={40} step={0.5} value={profile.yearsExperience ?? 0} onChange={(e) => setProfile((c) => ({ ...c, yearsExperience: Number(e.target.value) }))} style={inputStyle} /></label><label style={labelStyle}>Skills<input value={(profile.skills ?? []).join(", ")} onChange={(e) => setProfile((c) => ({ ...c, skills: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) }))} style={inputStyle} /></label><label style={labelStyle}>Dependants<input type="number" min={0} max={10} value={profile.dependants ?? 0} onChange={(e) => setProfile((c) => ({ ...c, dependants: Number(e.target.value) }))} style={inputStyle} /></label></div><div style={footerStyle}><button type="button" onClick={() => setStage("result")} style={secondaryButtonStyle}>Back</button><button type="button" onClick={showDetailedResult} style={primaryButtonStyle}>Recalculate Match Score</button></div></section>}
 
-    {stage === "migration-result" && <section style={sectionStyle}><div style={eyebrowStyle}>MIGRATION-AWARE COMPARISON</div><h2>Migration-aware ranking</h2><p style={mutedStyle}>This stays separate from your original result. UniPath does not guarantee PR, visa eligibility, invitation or skills assessment.</p>{loading ? <p>Calculating…</p> : error ? <ErrorBox text={error} /> : <ResultCards results={migrationResults} highestQualification={profile.highestQualification} />}<div style={warningStyle}>Migration evidence is used only where source-backed data exists. Missing evidence receives no invented advantage.</div><div style={footerStyle}><button type="button" onClick={() => setStage("result")} style={secondaryButtonStyle}>Back to original result</button><Link href="/local-v2/migration" style={linkButtonStyle}>Open Migration Explorer</Link></div></section>}
+    {stage === "migration-result" && <section style={sectionStyle}>{loading ? <LoadingPanel migration /> : <><div style={eyebrowStyle}>MIGRATION-AWARE COMPARISON</div><h2>Migration-aware ranking</h2><p style={mutedStyle}>This stays separate from your original result. UniPath does not guarantee PR, visa eligibility, invitation or skills assessment.</p>{error ? <ErrorBox text={error} /> : <ResultCards results={migrationResults} highestQualification={profile.highestQualification} />}<div style={warningStyle}>Migration evidence is used only where source-backed data exists. Missing evidence receives no invented advantage.</div><div style={footerStyle}><button type="button" onClick={() => setStage("result")} style={secondaryButtonStyle}>Back to original result</button><Link href="/local-v2/migration" style={linkButtonStyle}>Open Migration Explorer</Link></div></>}</section>}
   </main>;
+}
+
+function LoadingPanel({ migration = false }: { migration?: boolean }) {
+  return <div style={loadingPanelStyle} role="status" aria-live="polite" aria-busy="true">
+    <svg width="64" height="64" viewBox="0 0 50 50" aria-hidden="true" style={{ flex: "0 0 auto" }}>
+      <circle cx="25" cy="25" r="19" fill="none" stroke="#dbe8f8" strokeWidth="6" />
+      <path d="M25 6a19 19 0 0 1 19 19" fill="none" stroke="#0057b8" strokeWidth="6" strokeLinecap="round">
+        <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.8s" repeatCount="indefinite" />
+      </path>
+    </svg>
+    <div>
+      <div style={loadingTitleStyle}>{migration ? "Rechecking with migration evidence…" : "Finding your best matches…"}</div>
+      <div style={loadingCopyStyle}>{migration ? "Comparing the current shortlist with source-backed migration evidence where it exists." : "Checking live courses, career alignment, tuition, location and available entry evidence."}</div>
+      <div style={loadingDotsStyle} aria-hidden="true"><span>●</span><span>●</span><span>●</span></div>
+    </div>
+  </div>;
 }
 
 function feeEvidencePresentation(evidence?: FeeEvidence) {
@@ -337,6 +365,10 @@ const primaryButtonStyle = { border: 0, borderRadius: 9, background: "#d81b60", 
 const secondaryButtonStyle = { border: "1px solid #cfd5df", borderRadius: 9, background: "#fff", color: "#111827", padding: "11px 16px", fontWeight: 750, cursor: "pointer" } as const;
 const mutedStyle = { color: "#667085", lineHeight: 1.55 } as const;
 const eyebrowStyle = { color: "#475467", fontSize: 12, fontWeight: 850, letterSpacing: .8 } as const;
+const loadingPanelStyle = { minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", gap: 20, padding: "28px 12px", textAlign: "left" } as const;
+const loadingTitleStyle = { fontSize: 24, fontWeight: 900, color: "#101828", marginBottom: 7 } as const;
+const loadingCopyStyle = { color: "#667085", lineHeight: 1.55, maxWidth: 650 } as const;
+const loadingDotsStyle = { display: "flex", gap: 5, marginTop: 12, color: "#0057b8", fontSize: 10, letterSpacing: 2 } as const;
 const cardStyle = { border: "1px solid #e1e6ed", borderRadius: 16, padding: 20, background: "#fbfcfe" } as const;
 const rankStyle = { fontSize: 13, fontWeight: 850, color: "#475467" } as const;
 const scoreStyle = { minWidth: 92, textAlign: "center", background: "#eaf3ff", color: "#0057b8", borderRadius: 14, padding: "10px 12px", fontSize: 26, fontWeight: 900 } as const;
