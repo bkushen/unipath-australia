@@ -7,6 +7,7 @@ import { CurrencyBudgetInput } from "@/components/local-v2/CurrencyBudgetInput";
 import { SearchableDatabaseSelect, type SearchOption } from "@/components/local-v2/SearchableDatabaseSelect";
 import { assessDetailedProfile, type DetailedAssessment } from "@/lib/local-v2/detailed-assessment";
 import { assessLocation, type LocationAssessment } from "@/lib/local-v2/location-assessment";
+import { assessScholarshipPreference, previousServerScholarshipAdjustment, type ScholarshipAssessment } from "@/lib/local-v2/scholarship-assessment";
 import { clearLocalV2Profile, loadLocalV2Profile, saveLocalV2Profile } from "@/lib/local-v2/profile-storage";
 import type { AustralianState, EnglishTestType, MigrationImportance, ScholarshipImportance, StudentDecisionProfile } from "@/lib/local-v2/types";
 
@@ -67,6 +68,7 @@ type LiveRecommendation = {
   university: { id: string; name: string; website: string | null; logoUrl: string | null; cricosCode: string | null };
   campus: { id: string; name: string; city: string | null; state: string | null; postcode: string | null; regional: boolean; regional_verified: boolean | null; regional_classification: string | null };
   scholarship: { id: string; name: string; percentage: number | null; amount: number | null } | null;
+  scholarshipAssessment?: ScholarshipAssessment;
   livingCost: { weeklyLow: number; weeklyHigh: number; monthlyEstimate: number; status: string | null } | null;
   locationAssessment?: LocationAssessment;
   scores: { academic: number; career: number; affordability: number; location: number; migration: number; overall: number };
@@ -134,6 +136,20 @@ export default function QuickMatchPage() {
     setStep(Math.max(1, step - 1) as QuickStep);
   };
 
+  const applyScholarshipEvidence = (base: LiveRecommendation[]) => base.map((item) => {
+    const preference = profile.scholarshipImportance ?? "none";
+    const assessment = assessScholarshipPreference(preference, item.scholarship);
+    const previousAdjustment = previousServerScholarshipAdjustment(preference, Boolean(item.scholarship));
+    return {
+      ...item,
+      scholarshipAssessment: assessment,
+      scores: {
+        ...item.scores,
+        overall: clampScore(item.scores.overall - previousAdjustment + assessment.adjustment),
+      },
+    };
+  });
+
   const applyLocationEvidence = (base: LiveRecommendation[]) => base.map((item) => {
     const assessment = assessLocation({
       preferredLocation: profile.preferredLocation,
@@ -186,7 +202,7 @@ export default function QuickMatchPage() {
           regionalAccepted: profile.regionalAccepted,
           semesterBudget: (profile.semesterTuitionBudgetCents ?? 0) / 100,
           fullBudget: (profile.fullCourseBudgetCents ?? 0) / 100,
-          scholarshipImportance: profile.scholarshipImportance ?? "none",
+          scholarshipImportance: "none",
           migrationImportance,
         },
         candidates: base,
@@ -224,7 +240,8 @@ export default function QuickMatchPage() {
       const response = await fetch(`/api/local-v2/recommendations?${params.toString()}`);
       const data = await response.json() as { recommendations?: LiveRecommendation[]; detail?: string; error?: string };
       if (!response.ok) throw new Error(data.detail || data.error || "Unable to load recommendations.");
-      const locationAdjusted = applyLocationEvidence(data.recommendations ?? []);
+      const scholarshipAdjusted = applyScholarshipEvidence(data.recommendations ?? []);
+      const locationAdjusted = applyLocationEvidence(scholarshipAdjusted);
       const scored = await enrichWithAI(locationAdjusted, migrationImportance, detailedMode);
       if (target === "standard") setResults(scored); else setMigrationResults(scored);
     } catch (err) { setError((err as Error).message); } finally { setLoading(false); }
@@ -269,6 +286,11 @@ function LocationAssessmentPanel({ assessment, livingCost }: { assessment: Locat
   return <div style={locationAssessmentPanelStyle}><div style={qualificationTopStyle}><strong>Location & living-cost evidence</strong><span style={qualificationBadgeStyle}>Location fit · {assessment.score}%</span></div><div style={entryEvidenceMetaStyle}><span>{assessment.stateMatch ? "State preference matched" : "Outside preferred state"}</span><span>{assessment.locationMatch ? "Location matched" : "Location needs review"}</span><span>{assessment.regionalPreference === "verified_match" ? "Verified regional flag" : assessment.regionalPreference === "unverified_regional" ? "Regional flag not verified" : assessment.regionalPreference === "regional_not_accepted" ? "Regional not accepted" : "Non-regional"}</span></div><div style={{ ...qualificationTopStyle, marginTop: 9 }}><strong style={{ fontSize: 13 }}>Living costs</strong><span style={badgeStyleForLiving}>{assessment.livingEvidenceLabel}</span></div><div style={qualificationNoteStyle}>{livingCost ? `${money(livingCost.weeklyLow)}–${money(livingCost.weeklyHigh)}/week · ${money(livingCost.monthlyEstimate)}/month planning estimate. ` : "No campus-specific living-cost amount is loaded. "}{assessment.note}</div></div>;
 }
 
+function ScholarshipAssessmentPanel({ assessment, scholarship }: { assessment: ScholarshipAssessment; scholarship: LiveRecommendation["scholarship"] }) {
+  const badge = assessment.linked ? entryEvidencePartialStyle : entryEvidenceNeutralStyle;
+  return <div style={scholarshipAssessmentPanelStyle}><div style={qualificationTopStyle}><strong>Scholarship evidence</strong><span style={badge}>{assessment.label}</span></div>{scholarship && <div style={entryEvidenceMetaStyle}><span>{scholarship.name}</span><span>{scholarship.percentage != null ? `${scholarship.percentage}% listed value` : scholarship.amount != null ? `${money(scholarship.amount)} listed value` : "Value not loaded"}</span><span>{assessment.adjustment > 0 ? `+${assessment.adjustment} preference point${assessment.adjustment === 1 ? "" : "s"}` : "No ranking boost"}</span></div>}<div style={qualificationNoteStyle}>{assessment.note}</div></div>;
+}
+
 function ResultCards({ results, highestQualification, semesterBudget, fullCourseBudget }: { results: LiveRecommendation[]; highestQualification: string; semesterBudget: number; fullCourseBudget: number }) {
   if (!results.length) return <div style={emptyStyle}>No live course records matched these preferences. Try a broader study area or location.</div>;
   return <div style={{ display: "grid", gap: 16, marginTop: 18 }}>{results.slice(0, 8).map((item, index) => {
@@ -277,6 +299,7 @@ function ResultCards({ results, highestQualification, semesterBudget, fullCourse
       <div style={status === "likely_meets" ? successStyle : status === "needs_review" ? warningStyle : neutralStyle}><strong>{statusLabel}</strong>{confidenceLabel && <span> · {confidenceLabel}</span>}{item.ai?.entryRequirement?.source_url && <a href={item.ai.entryRequirement.source_url} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>source ↗</a>}</div>
       {item.ai?.detailedAssessment && <DetailedAssessmentPanel assessment={item.ai.detailedAssessment} />}
       {item.locationAssessment && <LocationAssessmentPanel assessment={item.locationAssessment} livingCost={item.livingCost} />}
+      {item.scholarshipAssessment && <ScholarshipAssessmentPanel assessment={item.scholarshipAssessment} scholarship={item.scholarship} />}
       <div style={entryEvidencePanelStyle}><div style={qualificationTopStyle}><strong>Entry requirement evidence</strong><span style={entryEvidence.style}>{entryEvidence.label}</span></div><div style={entryEvidenceMetaStyle}><span>{item.ai?.entryEvidence ? `${item.ai.entryEvidence.checkedFields} structured field${item.ai.entryEvidence.checkedFields === 1 ? "" : "s"} loaded` : "No structured requirement fields returned"}</span>{item.ai?.entryRequirement?.verified_at && <span>Verified {new Date(item.ai.entryRequirement.verified_at).toLocaleDateString("en-AU")}</span>}</div><div style={qualificationNoteStyle}>{entryEvidence.note} This evidence classification supports confidence and ranking only; it is not an admission decision.{item.ai?.entryRequirement?.source_url && <a href={item.ai.entryRequirement.source_url} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>entry source ↗</a>}</div></div>
       <div style={qualificationProgressStyle}><div style={qualificationTopStyle}><strong>Qualification progression</strong><span style={qualificationBadgeStyle}>{progressionLabel}{progressionScore != null ? ` · ${progressionScore}%` : ""}</span></div><div style={qualificationPathStyle}><span>{highestQualification || "Not entered"}</span><span aria-hidden="true">→</span><span>{item.course.qualificationLevel || "Course level not loaded"}</span></div><div style={qualificationNoteStyle}>This measures study-level progression fit only. It is not proof of admission, credit, advanced standing or eligibility.</div></div>
       <div style={careerEvidencePanelStyle}><div style={qualificationTopStyle}><strong>Career evidence</strong><span style={careerEvidence.style}>{careerEvidence.label}</span></div>{osca && <div style={careerPathStyle}><span>{osca.name}</span><span style={oscaCodeStyle}>OSCA {osca.code}</span>{osca.sourceRelease && <span style={careerSourceStyle}>{osca.sourceRelease}</span>}</div>}<div style={qualificationNoteStyle}>{careerEvidence.note}{item.careerMatch?.linkedOccupations?.length ? ` Linked UniPath occupation records: ${item.careerMatch.linkedOccupations.slice(0, 3).join(", ")}${item.careerMatch.linkedOccupations.length > 3 ? "…" : ""}.` : ""}</div></div>
@@ -285,7 +308,6 @@ function ResultCards({ results, highestQualification, semesterBudget, fullCourse
       <div style={feeGridStyle}><Info label="Annual tuition" value={money(item.course.annualFee, item.course.currency)} /><Info label="Total tuition" value={money(item.course.totalFee, item.course.currency)} /><Info label="Duration" value={item.course.durationMonths ? `${item.course.durationMonths} months` : "Not loaded"} /><Info label="Living cost" value={item.livingCost ? `${money(item.livingCost.weeklyLow)}–${money(item.livingCost.weeklyHigh)}/week` : "Not loaded"} /></div>
       <BudgetAssessmentPanel semesterBudget={semesterBudget} fullCourseBudget={fullCourseBudget} annualFee={item.course.annualFee} totalFee={item.course.totalFee} durationMonths={item.course.durationMonths} currency={item.course.currency} feeSource={item.feeEvidence?.source} derivedAnnual={item.feeEvidence?.derivedAnnual} />
       {item.ai && (item.ai.reasons.length > 0 || item.ai.cautions.length > 0) && <div style={reasonStyle}><strong>Why this score</strong>{item.ai.reasons.length > 0 && <ul>{item.ai.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}{item.ai.cautions.length > 0 && <><strong>Check before applying</strong><ul>{item.ai.cautions.map((r) => <li key={r}>{r}</li>)}</ul></>}</div>}
-      {item.scholarship && <div style={successStyle}><strong>Linked scholarship:</strong> {item.scholarship.name} · {item.scholarship.percentage != null ? `${item.scholarship.percentage}%` : money(item.scholarship.amount)}</div>}
       <div style={pillRowStyle}><Link href={`/local-v2/courses/${item.course.id}`} style={linkButtonStyle}>View course details</Link><Link href={`/local-v2/universities/${item.university.id}`} style={secondaryLinkStyle}>University profile</Link><Link href={`/local-v2/suburbs/${item.campus.id}`} style={secondaryLinkStyle}>Location & living costs</Link>{item.course.officialCourseUrl && <a href={item.course.officialCourseUrl} target="_blank" rel="noreferrer" style={secondaryLinkStyle}>Official course page ↗</a>}</div>
     </article>;
   })}</div>;
@@ -331,6 +353,7 @@ const infoStyle = { border: "1px solid #e3e7ee", borderRadius: 10, padding: 11, 
 const infoLabelStyle = { color: "#667085", fontSize: 12, marginBottom: 4 } as const;
 const detailedAssessmentPanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #c7d7fe", background: "#f5f8ff" } as const;
 const locationAssessmentPanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #b2ddff", background: "#f5fbff" } as const;
+const scholarshipAssessmentPanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #fedf89", background: "#fffdf5" } as const;
 const entryEvidencePanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #d7e3f4", background: "#fcfdff" } as const;
 const entryEvidenceMetaStyle = { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8, color: "#475467", fontSize: 12, fontWeight: 700 } as const;
 const entryEvidenceVerifiedStyle = { fontSize: 12, fontWeight: 850, color: "#067647", background: "#ecfdf3", border: "1px solid #abefc6", borderRadius: 999, padding: "4px 8px" } as const;
