@@ -15,6 +15,7 @@ type Candidate = {
 };
 
 type Profile = {
+  age?: number | null;
   highestQualification?: string;
   qualificationField?: string;
   academicScorePercent?: number | null;
@@ -43,6 +44,20 @@ type EntryRequirement = {
 };
 
 type EligibilityStatus = "likely_meets" | "needs_review" | "requirements_not_verified";
+type QualificationKind =
+  | "non_aqf"
+  | "certificate_iii"
+  | "certificate_iv"
+  | "diploma"
+  | "advanced_diploma"
+  | "associate_degree"
+  | "bachelor"
+  | "bachelor_honours"
+  | "graduate_certificate"
+  | "graduate_diploma"
+  | "masters"
+  | "doctoral"
+  | "unknown";
 
 const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 const tokens = (value: string) => value.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2);
@@ -54,37 +69,125 @@ function getSupabase() {
   return createSupabaseClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
 }
 
-function qualificationRank(value?: string | null) {
-  const q = (value ?? "").toLowerCase();
-  if (q.includes("doctor") || q.includes("phd")) return 8;
-  if (q.includes("master")) return 7;
-  if (q.includes("graduate diploma")) return 6;
-  if (q.includes("graduate certificate")) return 5;
-  if (q.includes("honour")) return 5;
-  if (q.includes("bachelor")) return 4;
-  if (q.includes("associate")) return 3;
-  if (q.includes("advanced diploma")) return 3;
-  if (q.includes("diploma")) return 2;
-  if (q.includes("certificate iv")) return 1;
-  return 0;
+function qualificationKind(value?: string | null): QualificationKind {
+  const q = (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!q) return "unknown";
+  if (q.includes("doctoral") || q.includes("doctorate") || q.includes("phd")) return "doctoral";
+  if (q.includes("master")) return "masters";
+  if (q.includes("graduate diploma")) return "graduate_diploma";
+  if (q.includes("graduate certificate")) return "graduate_certificate";
+  if (q.includes("bachelor honours") || q.includes("bachelor honor") || q.includes("honours degree")) return "bachelor_honours";
+  if (q.includes("bachelor")) return "bachelor";
+  if (q.includes("associate degree")) return "associate_degree";
+  if (q.includes("advanced diploma")) return "advanced_diploma";
+  if (q.includes("diploma")) return "diploma";
+  if (q.includes("certificate iv") || q.includes("certificate 4")) return "certificate_iv";
+  if (q.includes("certificate iii") || q.includes("certificate 3")) return "certificate_iii";
+  if (q.includes("non aqf") || q.includes("non-aqf")) return "non_aqf";
+  return "unknown";
+}
+
+function qualificationRank(kind: QualificationKind) {
+  switch (kind) {
+    case "certificate_iii": return 1;
+    case "certificate_iv": return 2;
+    case "diploma": return 3;
+    case "advanced_diploma": return 4;
+    case "associate_degree": return 4;
+    case "bachelor": return 5;
+    case "bachelor_honours": return 6;
+    case "graduate_certificate": return 7;
+    case "graduate_diploma": return 8;
+    case "masters": return 9;
+    case "doctoral": return 10;
+    default: return 0;
+  }
 }
 
 function qualificationReadiness(profile: Profile, candidate: Candidate) {
-  const current = qualificationRank(profile.highestQualification);
-  const target = qualificationRank(candidate.course.qualificationLevel);
-  if (!current || !target) return { score: 65, reason: null, caution: "Qualification-level readiness could not be fully checked from the entered labels." };
+  const currentKind = qualificationKind(profile.highestQualification);
+  const targetKind = qualificationKind(candidate.course.qualificationLevel);
+  const current = qualificationRank(currentKind);
+  const target = qualificationRank(targetKind);
 
-  if (target >= 7) {
-    if (current >= 4) return { score: 90, reason: "Your entered qualification level is broadly consistent with postgraduate-course entry pathways.", caution: null };
-    return { score: 48, reason: null, caution: "This is a postgraduate course and your entered qualification level may require a pathway or additional evidence." };
+  if (currentKind === "unknown" || targetKind === "unknown" || currentKind === "non_aqf" || targetKind === "non_aqf") {
+    return {
+      score: 65,
+      reason: null,
+      caution: "Qualification-level progression could not be assessed reliably from these labels. Check the university's actual entry requirements.",
+    };
   }
 
-  if (target === 4 || target === 5) {
-    if (current >= 2) return { score: 82, reason: "Your prior qualification level is broadly compatible with progressing to undergraduate study.", caution: null };
-    return { score: 60, reason: null, caution: "Undergraduate entry still needs checking against the university's country-specific academic requirements." };
+  if (targetKind === "doctoral") {
+    if (currentKind === "masters") {
+      return { score: 82, reason: "Your entered qualification is at a common prior level for doctoral study consideration.", caution: "Doctoral admission normally depends on research preparation and course-specific criteria, which still require verification." };
+    }
+    if (currentKind === "bachelor_honours" || currentKind === "graduate_diploma") {
+      return { score: 70, reason: null, caution: "Doctoral entry may be possible through some pathways, but research preparation and course-specific requirements must be checked." };
+    }
+    if (current >= target) {
+      return { score: 76, reason: "Your entered qualification is already at doctoral level.", caution: "This does not establish suitability or admission to another doctoral course." };
+    }
+    return { score: 48, reason: null, caution: "The selected course is doctoral level and your entered qualification does not by itself establish a typical direct-entry pathway." };
   }
 
-  return { score: 75, reason: null, caution: null };
+  if (targetKind === "masters") {
+    if (currentKind === "bachelor" || currentKind === "bachelor_honours" || currentKind === "graduate_certificate" || currentKind === "graduate_diploma" || currentKind === "masters" || currentKind === "doctoral") {
+      return { score: 86, reason: "Your entered qualification level is broadly consistent with common master's-level study pathways.", caution: "Actual admission still depends on the university's course-specific academic, field and equivalency requirements." };
+    }
+    return { score: 50, reason: null, caution: "This is a master's-level course. A pathway, additional qualification or other evidence may be required; UniPath does not assume direct eligibility." };
+  }
+
+  if (targetKind === "graduate_certificate" || targetKind === "graduate_diploma") {
+    if (current >= qualificationRank("bachelor")) {
+      return { score: 84, reason: "Your entered qualification level is broadly consistent with common graduate certificate/diploma study pathways.", caution: "Course-specific admission requirements still need verification." };
+    }
+    return { score: 52, reason: null, caution: "Graduate certificate/diploma entry often requires prior higher education or another approved pathway; direct eligibility is not assumed." };
+  }
+
+  if (targetKind === "bachelor_honours") {
+    if (currentKind === "bachelor") {
+      return { score: 84, reason: "Your entered bachelor's level is a plausible progression toward honours study.", caution: "Honours entry often depends on discipline relevance and academic performance, which must be checked." };
+    }
+    if (current >= qualificationRank("bachelor_honours")) {
+      return { score: 76, reason: "Your entered qualification is at or above honours level.", caution: "A higher qualification does not automatically establish admission or that this course is the best progression choice." };
+    }
+    return { score: 50, reason: null, caution: "Honours study usually requires an appropriate bachelor's-level pathway; course-specific requirements must be checked." };
+  }
+
+  if (targetKind === "bachelor") {
+    if (currentKind === "diploma" || currentKind === "advanced_diploma" || currentKind === "associate_degree") {
+      return { score: 80, reason: "Your entered qualification represents a plausible progression toward bachelor's study.", caution: "Any credit, advanced standing or direct entry depends on the university and is not assumed." };
+    }
+    if (currentKind === "certificate_iii" || currentKind === "certificate_iv") {
+      return { score: 66, reason: null, caution: "A bachelor's pathway may be available, but country-specific entry or pathway requirements still need checking." };
+    }
+    if (current >= qualificationRank("bachelor")) {
+      return { score: 76, reason: "Your entered qualification is at or above bachelor's level.", caution: "Studying another bachelor's degree may be suitable for a field change, but progression and admission should be assessed separately." };
+    }
+  }
+
+  if (targetKind === "associate_degree" || targetKind === "advanced_diploma" || targetKind === "diploma") {
+    if (current > target) {
+      return { score: 72, reason: "Your entered qualification is above the selected course level.", caution: "This may still suit a career change or skills goal, but it is not treated as automatic academic progression." };
+    }
+    if (current >= qualificationRank("certificate_iii")) {
+      return { score: 78, reason: "The selected course level is a plausible next or adjacent study level from your entered qualification.", caution: "Admission and credit depend on provider-specific requirements." };
+    }
+  }
+
+  if (targetKind === "certificate_iii" || targetKind === "certificate_iv") {
+    if (current > target) {
+      return { score: 70, reason: "Your entered qualification is above the selected certificate level.", caution: "This course may still be useful for vocational skills, but it is not treated as academic progression." };
+    }
+    return { score: 74, reason: null, caution: "Certificate entry requirements vary by provider and course and still need checking." };
+  }
+
+  return {
+    score: current === target ? 74 : 68,
+    reason: null,
+    caution: "Qualification-level fit is only a progression signal, not an admission decision. Check the loaded course requirements and the university's official criteria.",
+  };
 }
 
 function extractPercentageRequirement(text: string | null) {
@@ -322,7 +425,7 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, live course data, OSCA career evidence, and source-backed entry requirements. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
+        instructions: "You are UniPath Australia's course-fit scoring assistant. Score only from the supplied student profile, live course data, OSCA career evidence, and source-backed entry requirements. Qualification-level progression is only a fit signal and must never be treated as proof of admission eligibility. OSCA identifies occupations but does not recommend courses. Never invent missing requirements, fees, scholarships, migration eligibility, PR outcomes, visa outcomes, skills-assessment outcomes, or official occupation-to-course mappings. Missing evidence must lower confidence rather than be treated as a failure. Return conservative, explainable scores.",
         input: JSON.stringify({ profile, candidates: compactCandidates }),
         text: {
           format: {
