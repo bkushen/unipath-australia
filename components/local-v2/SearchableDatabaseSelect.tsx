@@ -34,7 +34,9 @@ export function SearchableDatabaseSelect({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [retryKey, setRetryKey] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const listboxId = `unipath-${type}-options`;
 
   useEffect(() => {
     setQuery(value);
@@ -60,8 +62,8 @@ export function SearchableDatabaseSelect({
           : `/api/local-v2/search-options?type=${encodeURIComponent(type)}&q=${encodeURIComponent(query)}`;
 
         const response = await fetch(endpoint, { signal: controller.signal });
-
         const contentType = response.headers.get("content-type") ?? "";
+
         if (!contentType.toLowerCase().includes("application/json")) {
           const preview = (await response.text()).replace(/\s+/g, " ").slice(0, 120);
           console.error("Quick Match search returned a non-JSON response", {
@@ -71,21 +73,21 @@ export function SearchableDatabaseSelect({
           });
           throw new Error(
             response.status === 404
-              ? "Quick Match search API was not found. Restart the local development server after pulling the latest code."
-              : `Quick Match search API returned ${response.status || "an invalid response"}. Check the npm dev terminal for the server error.`,
+              ? "The Quick Match search service is not available in this local build. Restart the development server after pulling the latest code."
+              : "The Quick Match search service returned an unexpected response. You can retry now or check the npm dev terminal for the server error.",
           );
         }
 
         const data = (await response.json()) as { options?: SearchOption[]; error?: string; detail?: string };
-        if (!response.ok) throw new Error(data.detail || data.error || "Search failed.");
+        if (!response.ok) throw new Error(data.detail || data.error || "The database search could not be completed.");
         setOptions(data.options ?? []);
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
-          setError((err as Error).message);
+          setError((err as Error).message || "The database search could not be completed.");
           setOptions([]);
         }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }, 220);
 
@@ -93,13 +95,21 @@ export function SearchableDatabaseSelect({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, query, type]);
+  }, [open, query, type, retryKey]);
 
   const choose = (option: SearchOption) => {
     setQuery(option.value);
     onChange(option.value);
     onSelect?.(option);
     setOpen(false);
+    setError("");
+  };
+
+  const retry = () => {
+    setError("");
+    setOptions([]);
+    setOpen(true);
+    setRetryKey((current) => current + 1);
   };
 
   return (
@@ -113,12 +123,16 @@ export function SearchableDatabaseSelect({
             const next = event.target.value;
             setQuery(next);
             onChange(next);
+            setError("");
             setOpen(true);
           }}
           placeholder={placeholder}
           autoComplete="off"
           role="combobox"
           aria-expanded={open}
+          aria-controls={open ? listboxId : undefined}
+          aria-autocomplete="list"
+          aria-invalid={Boolean(error)}
           style={inputStyle}
         />
         <span style={searchIconStyle}>⌕</span>
@@ -127,17 +141,31 @@ export function SearchableDatabaseSelect({
       {helper && <div style={helperStyle}>{helper}</div>}
 
       {open && (
-        <div style={menuStyle}>
+        <div id={listboxId} role="listbox" aria-busy={loading} style={menuStyle}>
           <div style={menuHeaderStyle}>
             <span>{loading ? "Searching UniPath database…" : type === "qualification" ? "Prior qualifications from UniPath database" : "Suggestions from UniPath database"}</span>
             <span style={sourceBadgeStyle}>DB</span>
           </div>
-          {error && <div style={errorStyle}>{error}</div>}
-          {!loading && !error && options.length === 0 && (
-            <div style={emptyStyle}>No matching database options. Try another word.</div>
+
+          {loading && <div style={loadingStyle} role="status" aria-live="polite">Loading database options…</div>}
+
+          {!loading && error && (
+            <div style={errorStyle} role="alert">
+              <strong>Unable to load database options.</strong>
+              <span style={stateCopyStyle}>{error}</span>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={retry} style={retryButtonStyle}>Retry</button>
+            </div>
           )}
-          {options.map((option) => (
-            <button key={option.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)} style={optionStyle}>
+
+          {!loading && !error && options.length === 0 && (
+            <div style={emptyStyle} role="status">
+              <strong>No matching database options.</strong>
+              <span style={stateCopyStyle}>{query.trim() ? "Try a broader or different search term." : "Start typing to narrow the available options."}</span>
+            </div>
+          )}
+
+          {!loading && !error && options.map((option) => (
+            <button key={option.id} type="button" role="option" aria-selected={option.value === value} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)} style={optionStyle}>
               <span style={{ fontWeight: 750 }}>{option.label}</span>
               {option.secondary && <span style={secondaryStyle}>{option.secondary}</span>}
             </button>
@@ -164,5 +192,8 @@ const menuHeaderStyle = { display: "flex", justifyContent: "space-between", gap:
 const sourceBadgeStyle = { background: "#eaf3ff", color: "#0057b8", borderRadius: 999, padding: "2px 6px", fontSize: 10 } as const;
 const optionStyle = { width: "100%", border: 0, borderBottom: "1px solid #f0f2f5", background: "#fff", textAlign: "left", padding: "11px 12px", cursor: "pointer", display: "grid", gap: 2, color: "#101828" } as const;
 const secondaryStyle = { color: "#667085", fontSize: 12 } as const;
-const emptyStyle = { padding: 14, color: "#667085", fontSize: 13 } as const;
-const errorStyle = { padding: 14, color: "#b42318", background: "#fff6f5", fontSize: 13 } as const;
+const stateCopyStyle = { display: "block", marginTop: 4, lineHeight: 1.45 } as const;
+const loadingStyle = { padding: 14, color: "#475467", background: "#f8fafc", fontSize: 13 } as const;
+const emptyStyle = { padding: 14, color: "#475467", fontSize: 13, display: "grid", gap: 2 } as const;
+const errorStyle = { padding: 14, color: "#b42318", background: "#fff6f5", fontSize: 13, display: "grid", gap: 5 } as const;
+const retryButtonStyle = { justifySelf: "start", marginTop: 5, border: "1px solid #fda29b", borderRadius: 8, background: "#fff", color: "#b42318", padding: "6px 10px", fontWeight: 750, cursor: "pointer" } as const;
