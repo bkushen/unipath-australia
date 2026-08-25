@@ -9,6 +9,9 @@ const PRIMARY_CAMPUS_LIMIT = 2;
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 const words = (value: string) => value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+const CAREER_STOP_WORDS = new Set([
+  "and", "the", "for", "with", "from", "into", "that", "this", "their", "they", "them", "work", "works", "working", "using", "use", "used", "including", "include", "includes", "other", "related", "services", "service", "activities", "activity", "systems", "system", "process", "processes", "professional", "professionals", "organisation", "organisations", "organization", "organizations", "business", "businesses", "management", "manager", "managers", "develop", "develops", "developing", "provide", "provides", "providing",
+]);
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -27,6 +30,19 @@ function textScore(query: string, ...values: Array<string | null | undefined>) {
   if (haystack.includes(query.toLowerCase())) return 100;
   const overlap = queryWords.filter((word) => haystack.includes(word)).length;
   return clamp(45 + overlap * 18);
+}
+
+function meaningfulCareerTokens(value: string) {
+  return [...new Set(words(value).filter((word) => word.length >= 4 && !CAREER_STOP_WORDS.has(word)))];
+}
+
+function tokenOverlapScore(source: string, target: string, minimumMatches: number, base: number, perMatch: number, cap: number) {
+  const sourceTokens = meaningfulCareerTokens(source);
+  if (!sourceTokens.length) return 0;
+  const targetTokens = new Set(meaningfulCareerTokens(target));
+  const matches = sourceTokens.filter((token) => targetTokens.has(token)).length;
+  if (matches < minimumMatches) return 0;
+  return Math.min(cap, base + matches * perMatch);
 }
 
 type CareerDomain = { triggers: string[]; courseTerms: string[] };
@@ -100,14 +116,29 @@ function inferredCareerScore(occupation: string, oscaOccupation: OscaOccupationR
     ...(oscaOccupation?.alternative_titles ?? []),
     ...(oscaOccupation?.specialisations ?? []),
   ].filter(Boolean).join(" ").toLowerCase();
-  const haystack = courseValues.filter(Boolean).join(" ").toLowerCase();
+  const courseText = courseValues.filter(Boolean).join(" ").toLowerCase();
   let domainScore = 45;
   for (const domain of careerDomains) {
     if (!domain.triggers.some((trigger) => occupationText.includes(trigger))) continue;
-    const matches = domain.courseTerms.filter((term) => haystack.includes(term)).length;
+    const matches = domain.courseTerms.filter((term) => courseText.includes(term)).length;
     if (matches > 0) domainScore = Math.max(domainScore, clamp(68 + matches * 7));
   }
-  return Math.max(direct, domainScore);
+
+  let oscaMetadataScore = 0;
+  if (oscaOccupation) {
+    const titleEvidence = [
+      oscaOccupation.name,
+      ...(oscaOccupation.alternative_titles ?? []),
+      ...(oscaOccupation.specialisations ?? []),
+    ].join(" ");
+    const titleScore = tokenOverlapScore(titleEvidence, courseText, 1, 67, 7, 92);
+    const descriptionScore = oscaOccupation.description
+      ? tokenOverlapScore(oscaOccupation.description, courseText, 2, 58, 4, 82)
+      : 0;
+    oscaMetadataScore = Math.max(titleScore, descriptionScore);
+  }
+
+  return Math.max(direct, domainScore, oscaMetadataScore);
 }
 
 function affordabilityScore(totalFee: number | null, annualFee: number | null, fullBudget: number, semesterBudget: number) {
@@ -432,13 +463,20 @@ export async function GET(request: NextRequest) {
         careerMatch: {
           source: careerMatchSource,
           linkedOccupations: occupationNames,
-          oscaOccupation: oscaOccupation ? { code: oscaOccupation.code, name: oscaOccupation.name, sourceRelease: oscaOccupation.source_release } : null,
+          oscaOccupation: oscaOccupation ? {
+            code: oscaOccupation.code,
+            name: oscaOccupation.name,
+            sourceRelease: oscaOccupation.source_release,
+            hasDescription: Boolean(oscaOccupation.description),
+            alternativeTitleCount: oscaOccupation.alternative_titles?.length ?? 0,
+            specialisationCount: oscaOccupation.specialisations?.length ?? 0,
+          } : null,
         },
         scores: { academic: base.academic, career, affordability: base.affordability, location: bestCampus.score, migration, overall },
         reasons: [
           base.academic >= 80 ? "Strong study-field match." : null,
           career >= 80 && careerMatchSource === "explicit_mapping" ? "Strong career match from an explicit course-to-career mapping." : null,
-          career >= 80 && careerMatchSource === "osca_metadata_inference" ? "Strong career relevance inferred from the selected ABS OSCA occupation name and its official alternative titles/specialisations, compared with the course name and study field." : null,
+          career >= 80 && careerMatchSource === "osca_metadata_inference" ? "Strong career relevance inferred by UniPath from the selected ABS OSCA occupation name, description, alternative titles and specialisations compared with the course name and study field." : null,
           career >= 80 && careerMatchSource === "inferred_text" ? "Strong career relevance inferred from the course name and study field." : null,
           base.affordability >= 80 && base.fee.source !== "unavailable" ? "Tuition is within or close to the stated budget using available fee evidence." : null,
           base.fee.source === "unavailable" ? "Tuition is not loaded, so affordability is not treated as strong evidence for or against this course." : null,
@@ -486,9 +524,14 @@ export async function GET(request: NextRequest) {
         sourceRelease: oscaOccupation.source_release,
         sourceUrl: oscaOccupation.source_url,
         verifiedAt: oscaOccupation.verified_at,
-        note: "OSCA identifies the occupation. Course relevance is still a UniPath inference unless an explicit course-to-career mapping is loaded.",
+        metadataCoverage: {
+          description: Boolean(oscaOccupation.description),
+          alternativeTitles: oscaOccupation.alternative_titles?.length ?? 0,
+          specialisations: oscaOccupation.specialisations?.length ?? 0,
+        },
+        note: "OSCA identifies and describes the occupation. Course relevance is a UniPath inference unless an explicit course-to-career mapping is loaded.",
       } : null,
-      careerMatching: oscaOccupation ? "osca_metadata_inference_plus_explicit_mappings" : "expanded_multidomain_inference_plus_explicit_mappings",
+      careerMatching: oscaOccupation ? "enriched_osca_metadata_inference_plus_explicit_mappings" : "expanded_multidomain_inference_plus_explicit_mappings",
       feeCoverage,
       feeMethod: "verified_course_fee_then_estimated_course_fee_then_course_record_then_cricos_tuition_total",
       diversity: {
