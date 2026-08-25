@@ -41,8 +41,18 @@ type QuickStep = 1 | 2 | 3 | 4;
 type EntryRequirement = { course_id: string; academic_text: string | null; minimum_gpa: number | string | null; relevant_field_required: boolean | null; ielts_overall: number | string | null; pte_overall: number | string | null; source_url: string | null; verified_at: string | null };
 type ScoreBreakdown = { baseCourseFit: number; qualificationReadiness: number; academicEvidence: number; englishEvidence: number; fieldEvidence: number; eligibilityEvidence: number };
 type AIScore = { courseId: string; aiScore: number; eligibilityStatus: "likely_meets" | "needs_review" | "requirements_not_verified"; confidence?: "high" | "medium" | "low"; scoreBreakdown?: ScoreBreakdown; reasons: string[]; cautions: string[]; entryRequirement: EntryRequirement | null };
+type FeeEvidence = {
+  source: "verified_course_fee" | "estimated_course_fee" | "course_record" | "cricos_tuition_total" | "unavailable" | string;
+  feeYear: number | null;
+  derivedAnnual: boolean;
+  sourceUrl: string | null;
+  verifiedAt: string | null;
+  verificationStatus: string | null;
+  note: string;
+};
 type LiveRecommendation = {
   course: { id: string; name: string; qualificationLevel: string | null; cricosCode: string | null; durationMonths: number | null; annualFee: number | null; totalFee: number | null; currency: string; deliveryMode: string | null; officialCourseUrl: string | null; studyField: string | null };
+  feeEvidence?: FeeEvidence;
   university: { id: string; name: string; website: string | null; logoUrl: string | null; cricosCode: string | null };
   campus: { id: string; name: string; city: string | null; state: string | null; postcode: string | null; regional: boolean; regional_verified: boolean | null; regional_classification: string | null };
   scholarship: { id: string; name: string; percentage: number | null; amount: number | null } | null;
@@ -252,6 +262,15 @@ export default function QuickMatchPage() {
   </main>;
 }
 
+function feeEvidencePresentation(evidence?: FeeEvidence) {
+  if (!evidence) return { label: "Fee evidence not supplied", style: feeEvidenceNeutralStyle };
+  if (evidence.source === "verified_course_fee") return { label: evidence.feeYear ? `Verified ${evidence.feeYear} fee` : "Verified course fee", style: feeEvidenceVerifiedStyle };
+  if (evidence.source === "estimated_course_fee") return { label: evidence.feeYear ? `Estimated ${evidence.feeYear} fee` : "Estimated course fee", style: feeEvidenceEstimatedStyle };
+  if (evidence.source === "cricos_tuition_total") return { label: "CRICOS-derived tuition", style: feeEvidenceDerivedStyle };
+  if (evidence.source === "course_record") return { label: "Course-record fee", style: feeEvidenceNeutralStyle };
+  return { label: "Fee unavailable", style: feeEvidenceMissingStyle };
+}
+
 function ResultCards({ results, highestQualification }: { results: LiveRecommendation[]; highestQualification: string }) {
   if (!results.length) return <div style={emptyStyle}>No live course records matched these preferences. Try a broader study area or location.</div>;
   return <div style={{ display: "grid", gap: 16, marginTop: 18 }}>{results.slice(0, 8).map((item, index) => {
@@ -261,10 +280,12 @@ function ResultCards({ results, highestQualification }: { results: LiveRecommend
     const confidenceLabel = item.ai?.confidence ? `${item.ai.confidence.charAt(0).toUpperCase()}${item.ai.confidence.slice(1)} evidence confidence` : null;
     const progressionScore = item.ai?.scoreBreakdown?.qualificationReadiness;
     const progressionLabel = progressionScore == null ? "Not assessed" : progressionScore >= 80 ? "Strong level fit" : progressionScore >= 70 ? "Reasonable level fit" : progressionScore >= 60 ? "Pathway / requirements check" : "Closer review needed";
+    const feeEvidence = feeEvidencePresentation(item.feeEvidence);
     return <article key={item.course.id} style={cardStyle}><div style={topRowStyle}><div><div style={rankStyle}>#{index + 1} {index === 0 ? "Best match" : "Alternative"}</div><h3 style={{ fontSize: 23, margin: "6px 0" }}>{item.course.name}</h3><div style={{ fontWeight: 800, color: "#0057b8" }}>{item.university.name}</div><div style={mutedStyle}>{item.campus.name}{item.campus.city ? ` · ${item.campus.city}` : ""}{item.campus.state ? `, ${item.campus.state}` : ""} {item.campus.regional ? "· Regional" : ""}</div></div><div style={scoreStyle}><div style={{ fontSize: 11 }}>MATCH SCORE</div>{score}%</div></div>
       <div style={status === "likely_meets" ? successStyle : status === "needs_review" ? warningStyle : neutralStyle}><strong>{statusLabel}</strong>{confidenceLabel && <span> · {confidenceLabel}</span>}{item.ai?.entryRequirement?.source_url && <a href={item.ai.entryRequirement.source_url} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>source ↗</a>}</div>
       <div style={qualificationProgressStyle}><div style={qualificationTopStyle}><strong>Qualification progression</strong><span style={qualificationBadgeStyle}>{progressionLabel}{progressionScore != null ? ` · ${progressionScore}%` : ""}</span></div><div style={qualificationPathStyle}><span>{highestQualification || "Not entered"}</span><span aria-hidden="true">→</span><span>{item.course.qualificationLevel || "Course level not loaded"}</span></div><div style={qualificationNoteStyle}>This measures study-level progression fit only. It is not proof of admission, credit, advanced standing or eligibility.</div></div>
       <div style={scoreGridStyle}><span>Course relevance <strong>{item.scores.academic}%</strong></span><span>Career <strong>{item.scores.career}%</strong></span><span>Budget <strong>{item.scores.affordability}%</strong></span><span>Location <strong>{item.scores.location}%</strong></span><span>Base score <strong>{item.scores.overall}%</strong></span>{item.ai?.scoreBreakdown && <span>Eligibility evidence <strong>{item.ai.scoreBreakdown.eligibilityEvidence}%</strong></span>}</div>
+      <div style={feeEvidencePanelStyle}><div style={qualificationTopStyle}><strong>Tuition evidence</strong><span style={feeEvidence.style}>{feeEvidence.label}</span></div><div style={qualificationNoteStyle}>{item.feeEvidence?.note ?? "No fee-source metadata was returned for this result. Confirm tuition with the university before applying."}{item.feeEvidence?.derivedAnnual ? " The annual amount is derived rather than a direct annual quote." : ""}{item.feeEvidence?.sourceUrl && <a href={item.feeEvidence.sourceUrl} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>fee source ↗</a>}</div></div>
       <div style={feeGridStyle}><Info label="Annual tuition" value={money(item.course.annualFee, item.course.currency)} /><Info label="Total tuition" value={money(item.course.totalFee, item.course.currency)} /><Info label="Duration" value={item.course.durationMonths ? `${item.course.durationMonths} months` : "Not loaded"} /><Info label="Living cost" value={item.livingCost ? `${money(item.livingCost.weeklyLow)}–${money(item.livingCost.weeklyHigh)}/week` : "Not loaded"} /></div>
       {item.ai && (item.ai.reasons.length > 0 || item.ai.cautions.length > 0) && <div style={reasonStyle}><strong>Why this score</strong>{item.ai.reasons.length > 0 && <ul>{item.ai.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}{item.ai.cautions.length > 0 && <><strong>Check before applying</strong><ul>{item.ai.cautions.map((r) => <li key={r}>{r}</li>)}</ul></>}</div>}
       {item.scholarship && <div style={successStyle}><strong>Linked scholarship:</strong> {item.scholarship.name} · {item.scholarship.percentage != null ? `${item.scholarship.percentage}%` : money(item.scholarship.amount)}</div>}
@@ -304,7 +325,7 @@ const cardStyle = { border: "1px solid #e1e6ed", borderRadius: 16, padding: 20, 
 const rankStyle = { fontSize: 13, fontWeight: 850, color: "#475467" } as const;
 const scoreStyle = { minWidth: 92, textAlign: "center", background: "#eaf3ff", color: "#0057b8", borderRadius: 14, padding: "10px 12px", fontSize: 26, fontWeight: 900 } as const;
 const scoreGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginTop: 16 } as const;
-const feeGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginTop: 14 } as const;
+const feeGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginTop: 10 } as const;
 const infoStyle = { border: "1px solid #e3e7ee", borderRadius: 10, padding: 11, background: "#fff" } as const;
 const infoLabelStyle = { color: "#667085", fontSize: 12, marginBottom: 4 } as const;
 const qualificationProgressStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #d7e3f4", background: "#f7faff" } as const;
@@ -312,6 +333,12 @@ const qualificationTopStyle = { display: "flex", justifyContent: "space-between"
 const qualificationBadgeStyle = { fontSize: 12, fontWeight: 850, color: "#0057b8", background: "#eaf3ff", borderRadius: 999, padding: "4px 8px" } as const;
 const qualificationPathStyle = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8, fontSize: 13, fontWeight: 700, color: "#344054" } as const;
 const qualificationNoteStyle = { marginTop: 7, color: "#667085", fontSize: 12, lineHeight: 1.45 } as const;
+const feeEvidencePanelStyle = { marginTop: 14, padding: 13, borderRadius: 11, border: "1px solid #e1e6ed", background: "#fff" } as const;
+const feeEvidenceVerifiedStyle = { fontSize: 12, fontWeight: 850, color: "#067647", background: "#ecfdf3", border: "1px solid #abefc6", borderRadius: 999, padding: "4px 8px" } as const;
+const feeEvidenceEstimatedStyle = { fontSize: 12, fontWeight: 850, color: "#9a3412", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 999, padding: "4px 8px" } as const;
+const feeEvidenceDerivedStyle = { fontSize: 12, fontWeight: 850, color: "#344054", background: "#f2f4f7", border: "1px solid #d0d5dd", borderRadius: 999, padding: "4px 8px" } as const;
+const feeEvidenceNeutralStyle = { fontSize: 12, fontWeight: 850, color: "#475467", background: "#f8fafc", border: "1px solid #d0d5dd", borderRadius: 999, padding: "4px 8px" } as const;
+const feeEvidenceMissingStyle = { fontSize: 12, fontWeight: 850, color: "#b42318", background: "#fff6f5", border: "1px solid #fecdca", borderRadius: 999, padding: "4px 8px" } as const;
 const reasonStyle = { marginTop: 14, padding: 14, borderRadius: 11, background: "#f6f8fb", lineHeight: 1.5 } as const;
 const successStyle = { marginTop: 14, padding: 12, borderRadius: 10, background: "#ecfdf3", color: "#067647", border: "1px solid #abefc6" } as const;
 const neutralStyle = { marginTop: 14, padding: 12, borderRadius: 10, background: "#f8fafc", color: "#475467", border: "1px solid #d0d5dd" } as const;
