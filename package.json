@@ -16,7 +16,8 @@
     "course-links:unsw": "node scripts/import-unsw-handbook-catalogue.mjs",
     "course-links:unsw:browser": "node scripts/enrich-unsw-handbook-browser.mjs",
     "course-links:unsw:verify": "node scripts/verify-unsw-course-links-v2.mjs",
-    "course-links:sydney": "node scripts/import-sydney-course-catalogue.mjs"
+    "course-links:sydney": "node scripts/import-sydney-course-catalogue.mjs",
+    "course-links:sydney:verify": "node scripts/verify-sydney-course-links.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
