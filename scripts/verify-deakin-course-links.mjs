@@ -11,7 +11,7 @@ const inputPath = String(args.get("input") ?? "data/course-link-audits/deakin-ha
 const outputDir = String(args.get("output-dir") ?? "data/course-link-audits");
 const outputJsonPath = `${outputDir}/deakin-verified-links.json`;
 const outputCsvPath = `${outputDir}/deakin-verified-links.csv`;
-const USER_AGENT = "UniPathAustralia/1.1 (+https://github.com/bkushen/unipath-australia; strict Deakin course-link verification)";
+const USER_AGENT = "UniPathAustralia/1.2 (+https://github.com/bkushen/unipath-australia; strict Deakin course-link verification)";
 
 async function loadEnvFile(path = ".env.local") {
   try {
@@ -60,8 +60,10 @@ function labelledDeakinCode(pageText) {
   return match ? match[1].toUpperCase() : null;
 }
 function extractAwardName(pageText, html) {
-  const awardMatch = String(pageText ?? "").match(/\bAward granted\s+(.{3,180}?)(?=\s+(?:Campus|Online|Length|Fee paying annual fee|CRICOS|Level|VTAC|Deakin course code|Australian Qualifications Framework)\b)/i);
-  return (awardMatch?.[1] || extractTag(html, "h1") || "").trim();
+  const awardMatch = String(pageText ?? "").match(/\bAward granted\s+(.{3,220}?)(?=\s+(?:Campus|Online|Length|Fee paying annual fee|CRICOS|Level|VTAC|Deakin course code|Australian Qualifications Framework|Course overview|Entry requirements|Career outcomes)\b)/i);
+  const raw = (awardMatch?.[1] || extractTag(html, "h1") || "").trim();
+  const embeddedAward = raw.match(/\bAward granted\s+(.+)$/i);
+  return (embeddedAward?.[1] || raw).trim();
 }
 function csvEscape(value) {
   const text = String(value ?? "");
