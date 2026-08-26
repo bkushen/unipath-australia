@@ -225,24 +225,48 @@ function nameCompatibility(courseName, entry) {
   return { exact: false, compatible: bestCoverage >= 0.5, coverage: bestCoverage };
 }
 
+function exactNameCandidates(course, catalogue) {
+  return catalogue.filter((entry) => entry.pageVerified && nameCompatibility(course.name, entry).exact);
+}
+
+function cricosMatches(course, entry) {
+  const cricos = compact(course.cricos_code);
+  return Boolean(cricos && entry.cricosCodes?.some((value) => compact(value) === cricos));
+}
+
 function matchCourse(course, catalogue, duplicateNameCount) {
   const cricos = compact(course.cricos_code);
   const providerCode = compact(course.university_course_code);
-  const cricosCandidates = cricos ? catalogue.filter((entry) => entry.cricosCodes.some((value) => compact(value) === cricos)) : [];
+  const cricosCandidates = cricos ? catalogue.filter((entry) => entry.cricosCodes?.some((value) => compact(value) === cricos)) : [];
   const providerCandidates = providerCode ? catalogue.filter((entry) => compact(entry.providerCode) === providerCode) : [];
   const pool = cricosCandidates.length ? cricosCandidates : providerCandidates;
-  if (!pool.length) return { accepted: false, reason: "no_current_handbook_identifier_match", entry: null, exactName: false, nameCompatible: false };
-  if (pool.length > 1) {
-    const exactNameEntries = pool.filter((entry) => nameCompatibility(course.name, entry).exact);
-    if (exactNameEntries.length === 1) return { accepted: true, reason: null, entry: exactNameEntries[0], exactName: true, nameCompatible: true };
-    return { accepted: false, reason: "multiple_handbook_pages_match_identifier", entry: pool[0], exactName: false, nameCompatible: false };
+
+  if (pool.length) {
+    if (pool.length > 1) {
+      const exactNameEntries = pool.filter((entry) => nameCompatibility(course.name, entry).exact);
+      if (exactNameEntries.length === 1) return { accepted: true, reason: null, matchMethod: cricosCandidates.length ? "cricos_and_exact_name" : "program_code_and_exact_name", entry: exactNameEntries[0], exactName: true, nameCompatible: true };
+      return { accepted: false, reason: "multiple_handbook_pages_match_identifier", matchMethod: null, entry: pool[0], exactName: false, nameCompatible: false };
+    }
+    const entry = pool[0];
+    if (!entry.pageVerified) return { accepted: false, reason: "official_handbook_page_not_verified", matchMethod: null, entry, exactName: false, nameCompatible: false };
+    const names = nameCompatibility(course.name, entry);
+    if (!names.compatible) return { accepted: false, reason: "handbook_name_not_compatible", matchMethod: null, entry, exactName: names.exact, nameCompatible: false };
+    return { accepted: true, reason: null, matchMethod: cricosCandidates.length ? "cricos_identifier" : "program_code_identifier", entry, exactName: names.exact, nameCompatible: names.compatible };
   }
-  const entry = pool[0];
-  if (!entry.pageVerified) return { accepted: false, reason: "official_handbook_page_not_verified", entry, exactName: false, nameCompatible: false };
-  const names = nameCompatibility(course.name, entry);
-  if (!names.compatible) return { accepted: false, reason: "handbook_name_not_compatible", entry, exactName: names.exact, nameCompatible: false };
-  if (duplicateNameCount > 1 && !cricos && !providerCode) return { accepted: false, reason: "duplicate_database_name_needs_identifier", entry, exactName: names.exact, nameCompatible: names.compatible };
-  return { accepted: true, reason: null, entry, exactName: names.exact, nameCompatible: names.compatible };
+
+  // Safe fallback for modern UNSW Handbook pages that do not expose CRICOS in the rendered DOM:
+  // require a single current, browser-verified Handbook page with an exact normalised title/award.
+  // Never use this fallback for duplicate DB names because those commonly represent historical/current CRICOS variants.
+  if (duplicateNameCount > 1) return { accepted: false, reason: "duplicate_database_name_needs_identifier", matchMethod: null, entry: null, exactName: false, nameCompatible: false };
+  const exactCandidates = exactNameCandidates(course, catalogue);
+  if (!exactCandidates.length) return { accepted: false, reason: "no_current_handbook_identifier_or_exact_title_match", matchMethod: null, entry: null, exactName: false, nameCompatible: false };
+  if (exactCandidates.length > 1) return { accepted: false, reason: "multiple_handbook_pages_match_exact_title", matchMethod: null, entry: exactCandidates[0], exactName: true, nameCompatible: true };
+  const entry = exactCandidates[0];
+  // If the current page does expose one or more CRICOS codes, a supplied DB CRICOS must agree.
+  if (course.cricos_code && entry.cricosCodes?.length && !cricosMatches(course, entry)) {
+    return { accepted: false, reason: "exact_title_but_current_page_cricos_differs", matchMethod: null, entry, exactName: true, nameCompatible: true };
+  }
+  return { accepted: true, reason: null, matchMethod: "unique_exact_title", entry, exactName: true, nameCompatible: true };
 }
 
 await mkdir(outputDir, { recursive: true });
@@ -286,19 +310,20 @@ for (let index = 0; index < selected.length; index += 1) {
     candidate_programme_name: entry?.programmeName ?? null,
     candidate_awards: entry?.awards?.join(" | ") ?? "",
     candidate_cricos_codes: entry?.cricosCodes?.join("|") ?? "",
+    match_method: result.matchMethod,
     exact_name: result.exactName,
     name_compatible: result.nameCompatible,
     accepted: result.accepted,
     rejection_reason: result.reason,
     write_status: writeStatus,
   });
-  console.log(`[${index + 1}/${selected.length}] ${course.name} -> ${result.accepted ? "MATCH" : "review"}${result.reason ? ` [${result.reason}]` : ""}${entry?.url ? ` ${entry.url}` : ""}`);
+  console.log(`[${index + 1}/${selected.length}] ${course.name} -> ${result.accepted ? "MATCH" : "review"}${result.matchMethod ? ` [${result.matchMethod}]` : ""}${result.reason ? ` [${result.reason}]` : ""}${entry?.url ? ` ${entry.url}` : ""}`);
 }
 
 await writeFile(auditJsonPath, `${JSON.stringify({ generatedAt: new Date().toISOString(), schemaVersion: SCHEMA_VERSION, year, writeMode, rows }, null, 2)}\n`, "utf8");
-const headers = ["course_id","course_name","cricos_code","university_course_code","candidate_url","candidate_program_code","candidate_programme_name","candidate_awards","candidate_cricos_codes","exact_name","name_compatible","accepted","rejection_reason","write_status"];
+const headers = ["course_id","course_name","cricos_code","university_course_code","candidate_url","candidate_program_code","candidate_programme_name","candidate_awards","candidate_cricos_codes","match_method","exact_name","name_compatible","accepted","rejection_reason","write_status"];
 const csv = [headers.join(","), ...rows.map((row) => headers.map((key) => csvEscape(row[key])).join(","))].join("\n");
 await writeFile(auditCsvPath, `${csv}\n`, "utf8");
 console.log("\n=== UNSW Handbook run summary ===");
 console.log(JSON.stringify({ databaseCourses: courses.length, pending: pending.length, processed: selected.length, catalogueEntries: catalogue.length, matched, written, auditJson: auditJsonPath, auditCsv: auditCsvPath, catalogueCache: cataloguePath }, null, 2));
-if (!writeMode) console.log("Dry run only. Only current UNSW Handbook pages with matching official CRICOS/program identifiers are eligible for --write.");
+if (!writeMode) console.log("Dry run only. Identifier matches are preferred; otherwise only a unique current browser-verified exact title with no conflicting current CRICOS is eligible.");
