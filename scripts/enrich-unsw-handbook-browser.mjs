@@ -75,24 +75,36 @@ async function connectBrowser() {
   await cdp.send("Runtime.enable"); await cdp.send("Page.enable");
   return { child, ws, cdp };
 }
+function extractProgrammeNameFromRenderedText(text, renderedTitle) {
+  const lines = String(text ?? "").split(/\r?\n/).map((line) => normalise(line)).filter(Boolean);
+  const homeIndex = lines.findIndex((line) => /^Home$/i.test(line));
+  if (homeIndex >= 0) {
+    for (let i = homeIndex + 1; i < Math.min(lines.length, homeIndex + 8); i += 1) {
+      const line = lines[i];
+      if (/^\/$/.test(line) || /^(chevron_|expand_|open |search\b)/i.test(line)) continue;
+      if (!/^Handbook$/i.test(line) && line.length >= 3 && line.length <= 220) return line;
+    }
+  }
+  const titleName = normalise(String(renderedTitle ?? "").replace(/^Handbook\s*[-|:]\s*/i, ""));
+  return /^Handbook(?:\s*[-|:].*)?$/i.test(titleName) ? "" : titleName;
+}
 async function renderEntry(cdp, url) {
   await cdp.send("Page.navigate", { url });
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    await sleep(400);
+  for (let attempt = 0; attempt < 35; attempt += 1) {
+    await sleep(450);
     const state = await cdp.eval(`(() => ({href: location.href, title: document.title || "", text: document.body?.innerText || ""}))()`);
-    if (state?.href?.includes("handbook.unsw.edu.au") && state.text && state.text.length > 500 && !/^Handbook\s*$/i.test(state.title)) {
+    if (state?.href?.includes("handbook.unsw.edu.au") && state.text && state.text.length > 800) {
       const text = state.text;
-      const cricosCodes = [...new Set([...text.matchAll(/CRICOS\s+Code\s*\n?\s*([0-9]{6}[A-Z]|[0-9]{7})/gi)].map((m) => m[1].toUpperCase()))];
-      const titleName = normalise(state.title.replace(/^Handbook\s*-\s*/i, ""));
-      let programmeName = titleName;
-      if (!programmeName || /^Handbook$/i.test(programmeName)) {
-        const crumb = text.match(/Home\s*\/\s*([^\n]{3,180})/i);
-        programmeName = normalise(crumb?.[1] ?? "");
-      }
+      const programmeName = extractProgrammeNameFromRenderedText(text, state.title);
+      if (!programmeName) continue;
+      const cricosCodes = [...new Set([...text.matchAll(/CRICOS\s+Code\s*(?:\r?\n|\s|:|-)*([0-9]{6}[A-Z]|[0-9]{7})/gi)].map((m) => m[1].toUpperCase()))];
       const awards = [];
-      const awardSection = text.match(/Award\(s\)[\s\S]{0,1200}?(?=\n(?:UAC Code|CRICOS Code|Learning Outcomes|Program Structure|Overview)\b)/i)?.[0] ?? "";
-      for (const match of awardSection.matchAll(/\b((?:Bachelor|Master|Doctor|Graduate Certificate|Graduate Diploma|Diploma|Associate Degree|Juris Doctor)[^\n]{2,180}?)(?=\s+-\s+[A-Z]|\n|$)/g)) awards.push(normalise(match[1]));
-      return { programmeName, awards: [...new Set(awards.filter(Boolean))], cricosCodes, renderedTitle: state.title, browserRendered: true };
+      const awardSection = text.match(/Award\(s\)[\s\S]{0,1600}?(?=\r?\n(?:UAC Code|CRICOS Code|Learning Outcomes|Program Structure|Overview|Minimum Units of Credit)\b)/i)?.[0] ?? "";
+      for (const match of awardSection.matchAll(/\b((?:Bachelor|Master|Doctor|Graduate Certificate|Graduate Diploma|Diploma|Associate Degree|Juris Doctor)[^\r\n]{2,220}?)(?=\s+-\s+[A-Z]|\r?\n|$)/g)) {
+        const award = normalise(match[1]);
+        if (award && !/^Bachelor$|^Master$|^Doctor$/i.test(award)) awards.push(award);
+      }
+      return { programmeName, awards: [...new Set(awards)], cricosCodes, renderedTitle: state.title, browserRendered: true };
     }
   }
   return { programmeName: "", awards: [], cricosCodes: [], browserRendered: false, renderError: "render_timeout_or_shell_only" };
