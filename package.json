@@ -13,7 +13,8 @@
     "course-links:monash": "node scripts/import-monash-handbook-browser.mjs",
     "course-links:deakin": "node scripts/import-deakin-handbook-catalogue.mjs",
     "course-links:deakin:verify": "node scripts/verify-deakin-course-links.mjs",
-    "course-links:unsw": "node scripts/import-unsw-handbook-catalogue.mjs"
+    "course-links:unsw": "node scripts/import-unsw-handbook-catalogue.mjs",
+    "course-links:unsw:browser": "node scripts/enrich-unsw-handbook-browser.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
