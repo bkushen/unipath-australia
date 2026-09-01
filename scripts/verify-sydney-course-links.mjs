@@ -30,7 +30,16 @@ async function loadEnvFile(path = ".env.local") {
 }
 
 function normalise(value) {
-  return String(value ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " and ").replace(/\bhonors\b/gi, "honours").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\(\s*20\d{2}\s+entry\s*\)\s*$/gi, "")
+    .replace(/&/g, " and ")
+    .replace(/\bhonors\b/gi, "honours")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 function compact(value) { return normalise(value).replace(/ /g, ""); }
 function decodeHtml(value) { return String(value ?? "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">"); }
