@@ -6,7 +6,21 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "course-links": "node scripts/fetch-official-course-links.mjs",
+    "course-links:rmit": "node scripts/import-rmit-course-catalogue.mjs",
+    "course-links:rmit:verify": "node scripts/verify-rmit-course-links.mjs",
+    "course-links:monash": "node scripts/import-monash-handbook-browser.mjs",
+    "course-links:deakin": "node scripts/import-deakin-handbook-catalogue.mjs",
+    "course-links:deakin:verify": "node scripts/verify-deakin-course-links.mjs",
+    "course-links:unsw": "node scripts/import-unsw-handbook-catalogue.mjs",
+    "course-links:unsw:browser": "node scripts/enrich-unsw-handbook-browser.mjs",
+    "course-links:unsw:verify": "node scripts/verify-unsw-course-links-v2.mjs",
+    "course-links:sydney": "node scripts/import-sydney-course-catalogue.mjs",
+    "course-links:sydney:verify": "node scripts/verify-sydney-course-links.mjs",
+    "course-links:uts": "node scripts/import-uts-course-catalogue.mjs",
+    "course-links:uts:verify": "node scripts/verify-uts-course-links.mjs",
+    "course-links:adelaide": "node scripts/import-adelaide-course-catalogue.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
